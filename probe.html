@@ -30,6 +30,13 @@
   .note{font-size:11px;color:var(--sub);line-height:1.7;margin-top:10px}
   pre{background:var(--card2);border-radius:10px;padding:12px;font-size:10.5px;line-height:1.6;
     white-space:pre-wrap;word-break:break-all;margin:10px 0 0;max-height:260px;overflow:auto;color:#a8b4d0}
+  .banner{background:linear-gradient(135deg,rgba(251,114,153,.16),rgba(47,123,255,.12));
+    border:1px solid rgba(251,114,153,.35);border-radius:14px;padding:14px 16px;margin-bottom:14px}
+  .brow{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;padding:3px 0}
+  .brow span{color:var(--sub)}
+  .brow b{font-size:15px}
+  .bhint{font-size:10.5px;color:var(--sub);margin-top:8px;text-align:right}
+  .good{color:var(--ok)} .bad{color:var(--err)} .wait2{color:var(--warn)}
 </style>
 </head>
 <body>
@@ -37,9 +44,14 @@
   <h1>环境能力诊断</h1>
   <div class="sub">在 B站 App 内打开本页，用来确认「定位」和「方向」这两个能力是否可用。<br/>结果只在本机计算，不上传。</div>
 
+  <div class="banner" id="banner">
+    <div class="brow"><span>定位</span><b id="bGeo">检测中…</b></div>
+    <div class="brow"><span>方向</span><b id="bOri">检测中…</b></div>
+    <div class="bhint">截图这一块发回来就够了</div>
+  </div>
+
   <div class="card">
-    <div class="title">运行环境 <span class="tag" id="tEnv">检测中</span></div>
-    <div class="kv"><span class="k">UA</span><span class="v" id="ua">--</span></div>
+    <div class="title">运行环境 <span class="tag" id="tEnv">检测中</span></div>    <div class="kv"><span class="k">UA</span><span class="v" id="ua">--</span></div>
     <div class="kv"><span class="k">是否 B站客户端</span><span class="v" id="isBili">--</span></div>
     <div class="kv"><span class="k">安全上下文</span><span class="v" id="secure">--</span></div>
     <div class="kv"><span class="k">localStorage</span><span class="v" id="ls">--</span></div>
@@ -114,9 +126,13 @@ try {
 $('geoApi').textContent = navigator.geolocation ? '有' : '无';
 var geoTried = false;
 
+function setBanner(id, text, cls){
+  var el = $(id); el.textContent = text; el.className = cls || '';
+}
 function geoResult(kind, text, cls){
   $('geoState').textContent = text;
   setTag('tGeo', kind, cls);
+  setBanner('bGeo', kind + (cls === 'ok' ? '' : ' · ' + text), cls === 'ok' ? 'good' : 'bad');
   log.geoState = text;
 }
 
@@ -183,9 +199,11 @@ if (typeof DeviceOrientationEvent === 'undefined'){
     setTimeout(function(){
       if (oriCount === 0){
         setTag('tOri', '无数据', 'bad');
+        setBanner('bOri', '不可用 · 收不到事件', 'bad');
         log.ori = 'no-events';
       } else {
         setTag('tOri', '可用', 'ok');
+        setBanner('bOri', '可用 · ' + oriCount + ' 次', 'good');
         log.ori = 'ok';
       }
     }, 8000);
@@ -197,7 +215,7 @@ if (typeof DeviceOrientationEvent === 'undefined'){
       permState = s;
       $('oriPerm').textContent = '需要 · 当前 ' + s;
       if (s === 'granted') startOri();
-      else if (s === 'denied'){ setTag('tOri', '被拒绝', 'bad'); log.ori = 'denied'; }
+      else if (s === 'denied'){ setTag('tOri', '被拒绝', 'bad'); setBanner('bOri', '不可用 · 权限被拒', 'bad'); log.ori = 'denied'; }
       else startOri();
     }).catch(function(){ startOri(); });
   } else {
