@@ -501,17 +501,67 @@ function setHeading(rawDeg){
 
 let lastCompass = 0, compassApprox = false;
 
-/* 带倾角补偿的罗盘角：手机立着拿也能算对，不只是平放时 */
-function tiltCompensatedHeading(alpha, beta, gamma){
-  const rad = PI / 180;
-  const _x = beta * rad, _y = gamma * rad, _z = alpha * rad;
-  const cX = Math.cos(_x), cY = Math.cos(_y), cZ = Math.cos(_z);
-  const sX = Math.sin(_x), sY = Math.sin(_y), sZ = Math.sin(_z);
-  const Vx = -cZ * sY - sZ * sX * cY;
-  const Vy = -sZ * sY + cZ * sX * cY;
-  let h = Math.atan2(Vx, Vy) * 180 / PI;
-  if (h < 0) h += 360;
-  return h;
+/* ------------------------------------------------------------------
+   罗盘角解算（与地图 SDK 同思路：旋转矩阵 + 选取稳定的投影轴）
+
+   设备坐标系：x 右、y 上、z 出屏；地理坐标系：X 东、Y 北、Z 天
+   R = Rz(alpha) · Rx(beta) · Ry(gamma)
+   把设备轴转到地理系后，取它在水平面上的方位角。
+   - 手机平放：y 轴（顶部）水平分量最大 → 用 y 轴
+   - 手机立起：y 轴接近垂直 → 改用背面法线(-z)，两者方位角本来一致
+   这样避免 beta 接近 0/90 时 atan2 的数值退化（这是之前偏 45° 的根因之一）
+------------------------------------------------------------------- */
+function rotateToWorld(alpha, beta, gamma, v){
+  const a = alpha * PI / 180, b = beta * PI / 180, g = gamma * PI / 180;
+  const ca = Math.cos(a), sa = Math.sin(a);
+  const cb = Math.cos(b), sb = Math.sin(b);
+  const cg = Math.cos(g), sg = Math.sin(g);
+
+  // Ry(gamma)
+  let x = v[0] * cg + v[2] * sg;
+  let y = v[1];
+  let z = -v[0] * sg + v[2] * cg;
+  // Rx(beta)
+  const y2 = y * cb - z * sb;
+  const z2 = y * sb + z * cb;
+  y = y2; z = z2;
+  // Rz(alpha)
+  const x3 = x * ca - y * sa;
+  const y3 = x * sa + y * ca;
+  return [x3, y3, z];
+}
+
+function azimuthOf(vec){
+  let d = Math.atan2(vec[0], vec[1]) * 180 / PI;   // atan2(东, 北)
+  if (d < 0) d += 360;
+  return d;
+}
+
+function headingFromOrientation(alpha, beta, gamma){
+  const top = rotateToWorld(alpha, beta, gamma, [0, 1, 0]);    // 设备顶部
+  const back = rotateToWorld(alpha, beta, gamma, [0, 0, -1]);  // 背面法线（摄像头朝向）
+
+  const topH = Math.hypot(top[0], top[1]);    // 顶部轴的水平分量
+  const backH = Math.hypot(back[0], back[1]); // 背面轴的水平分量
+
+  return azimuthOf(backH > topH ? back : top);
+}
+
+/* 圆周平滑：避免箭头抖动、跳变 */
+let smX = null, smY = null;
+function smoothHeading(deg){
+  const r = deg * PI / 180;
+  const x = Math.sin(r), y = Math.cos(r);
+  if (smX === null || smY === null){ smX = x; smY = y; }
+  else {
+    const k = 0.22;
+    smX += (x - smX) * k;
+    smY += (y - smY) * k;
+    const len = Math.hypot(smX, smY) || 1;
+    smX /= len; smY /= len;
+  }
+  let d = Math.atan2(smX, smY) * 180 / PI;
+  return (d + 360) % 360;
 }
 
 /* 屏幕横竖屏会改变“屏幕上方”对应的物理方向，需要扣掉 */
@@ -537,10 +587,7 @@ function onOrientation(e, fromAbsoluteEvent){
   if (hasWebkit){
     h = e.webkitCompassHeading;                                    // iOS：真北
   } else if (typeof e.alpha === 'number'){
-    const beta = e.beta || 0;
-    // 平放时公式退化，直接用 alpha；立着/斜着拿用倾角补偿公式
-    h = Math.abs(beta) < 8 ? ((360 - e.alpha) % 360)
-                           : tiltCompensatedHeading(e.alpha, beta, e.gamma || 0);
+    h = headingFromOrientation(e.alpha, e.beta || 0, e.gamma || 0);
     approx = !isAbsolute;                                          // 相对朝向
   }
 
@@ -551,7 +598,9 @@ function onOrientation(e, fromAbsoluteEvent){
   compassLive = true;
   compassApprox = approx;
   state.ori = { a: Math.round(e.alpha || 0), b: Math.round(e.beta || 0), g: Math.round(e.gamma || 0) };
-  setHeading((h - screenAngle() + 360) % 360);
+
+  const screenDeg = (h - screenAngle() + 360) % 360;
+  setHeading(smoothHeading(screenDeg));
 }
 
 let compassLive = false, compassStarted = false;
