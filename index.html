@@ -234,8 +234,42 @@ const CONFIG = {
   overlaySpanMeters: 520,       // 展会底图覆盖的边长（米）
   overlayUrl: '',               // 填你的展会平面图地址；留空用内置示例图
   lockShowsSelf: true,          // 未解锁时显示灰色自身点位（调试用）
-  routeEnabled: true            // 展示路径（对接已有规划能力的占位）
+  routeEnabled: true,           // 展示路径（对接已有规划能力的占位）
+  biliGeoTimeout: 6000          // B站 WebView 内的定位超时（毫秒），超时即降级
 };
+
+/* ==================================================================
+   B站容器兼容层
+   ------------------------------------------------------------------
+   WebView 里 geolocation / deviceorientation 是否可用，完全取决于宿主 App
+   有没有实现对应的回调。这里做三件事：
+   1) 优先调用宿主注入的 JSBridge 拿位置（最可靠）
+   2) 否则退回 geolocation，并设短超时，避免静默挂起
+   3) 两者都失败时，降级为「手动进入展区」，页面永远不白屏
+   ================================================================== */
+const IS_BILI = /bilibili|biliapp|bstar/i.test(navigator.userAgent)
+             || /[?&]bili=1/.test(location.search)          // 加 ?bili=1 可在普通浏览器里模拟
+             || typeof window.__BILI_LOCATION__ === 'function';
+
+/* 约定的宿主注入接口：
+   window.__BILI_LOCATION__ = () => ({ lat, lng, accuracy, heading })
+   只要 B站 容器按这个约定注入，页面无需改动即可拿到原生定位 */
+function readNativeFix(){
+  try {
+    const fn = window.__BILI_LOCATION__;
+    if (typeof fn === 'function'){
+      const r = fn();
+      if (r && typeof r.lat === 'number' && typeof r.lng === 'number'){
+        return {
+          lng: r.lng, lat: r.lat,
+          acc: typeof r.accuracy === 'number' ? r.accuracy : 50,
+          speed: r.speed, heading: r.heading
+        };
+      }
+    }
+  } catch (e) { /* 容器未注入或调用失败 */ }
+  return null;
+}
 
 /* ==================================================================
    坐标系 / 投影
@@ -856,13 +890,47 @@ function onErr(e){
                3:'定位超时，请靠近窗边或室外后重试。'};
   showErr('⚠ ' + (map[e.code] || e.message || '未知错误'));
   setStatus('err', '定位失败');
+  if (IS_BILI) biliFallback('B站容器未放行定位');
 }
 
+/* B站 内定位不可用时的兜底提示 */
+function biliFallback(reason){
+  showErr('⚠ ' + reason + '：可点下方「模拟进入」先体验地图，或改用浏览器打开（容器未开放定位回调）');
+  $('lockHint').textContent = '当前容器不支持定位，可点下方按钮手动进入展区';
+  $('btnSim').textContent = '手动进入展区（容器不支持定位）';
+  $('btnSim').style.display = '';
+  setStatus('lock', '容器不支持定位');
+}
+
+let nativeTimer = null;
 function startWatch(){
-  if (watchId !== null) return;
-  watchId = navigator.geolocation.watchPosition(onFix, onErr, OPTS);
+  if (watchId !== null || nativeTimer !== null) return;
+
+  // 1) 优先用宿主 JSBridge 注入的位置
+  const nf = readNativeFix();
+  if (nf){
+    onFix({ coords: { latitude: nf.lat, longitude: nf.lng, accuracy: nf.acc,
+                      speed: nf.speed, heading: nf.heading } });
+    nativeTimer = setInterval(() => {
+      const r = readNativeFix();
+      if (r) onFix({ coords: { latitude: r.lat, longitude: r.lng, accuracy: r.acc,
+                               speed: r.speed, heading: r.heading } });
+    }, 2000);
+    return;
+  }
+
+  // 2) 退回浏览器 API（B站 内用更短超时，避免静默挂起）
+  if (!navigator.geolocation){
+    if (IS_BILI) biliFallback('容器不支持 geolocation');
+    return;
+  }
+  const opts = IS_BILI
+    ? { enableHighAccuracy: true, timeout: CONFIG.biliGeoTimeout, maximumAge: 0 }
+    : OPTS;
+  watchId = navigator.geolocation.watchPosition(onFix, onErr, opts);
 }
 function stopWatch(){
+  if (nativeTimer !== null){ clearInterval(nativeTimer); nativeTimer = null; }
   if (watchId === null) return;
   navigator.geolocation.clearWatch(watchId);
   watchId = null;
@@ -1091,7 +1159,7 @@ function boot(){
   $('lockDist').textContent = '-- m';
   $('lockHint').textContent = `进入 ${venue().name} 周边 ${venue().radius} m 内自动解锁`;
 
-  setStatus('wait', '定位中…');
+  setStatus('wait', IS_BILI ? 'B站内 · 定位中…' : '定位中…');
   updateNavBtn();
   render();
   requestAnimationFrame(render);
@@ -1099,17 +1167,23 @@ function boot(){
   syncVisibility();
 
   setTimeout(() => {
-    if (!state.fix) $('dbg').textContent = '仍未取得定位：请确认已允许位置权限、且设备定位已开启';
+    if (!state.fix){
+      $('dbg').textContent = '仍未取得定位：请确认已允许位置权限、且设备定位已开启';
+      if (IS_BILI) biliFallback('容器未返回定位');
+    }
     if (!compassLive && state.heading === null){
       const waiting = $('permbar').classList.contains('show');
       if (waiting){
         $('heading').textContent = '待授权';
+      } else if (IS_BILI){
+        $('heading').textContent = '方向不可用';
+        toast('B站容器未开放方向传感器，箭头无法显示（地图其余功能正常）');
       } else {
         $('heading').textContent = '无方向传感器';
         toast('没检测到方向传感器：需要手机打开，iOS 要允许「运动与方向」');
       }
     }
-  }, 5000);
+  }, IS_BILI ? 7000 : 5000);
 }
 
 window.addEventListener('resize', scheduleRender);
