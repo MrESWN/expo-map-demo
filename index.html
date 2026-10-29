@@ -642,15 +642,35 @@ function screenAngle(){
 }
 
 let sawAbsolute = false;
+let sampleCount = 0;
+let lastWasApprox = null;
+let compassStartAt = 0;
+
+/* 重置平滑：让箭头立刻对齐新值，而不是慢慢“漂”过去 */
+function resetSmoothing(){
+  smX = null; smY = null;   // 圆周平滑状态
+  guardDeg = null;          // 跳变保护基准
+}
 
 function onOrientation(e, fromAbsoluteEvent){
   const hasWebkit = typeof e.webkitCompassHeading === 'number'
     && !isNaN(e.webkitCompassHeading) && e.webkitCompassHeading >= 0;
   const isAbsolute = hasWebkit || fromAbsoluteEvent || !!e.absolute;
 
+  if (!compassStartAt) compassStartAt = performance.now();
   if (fromAbsoluteEvent) sawAbsolute = true;
-  // 已经有绝对方向源时，丢弃相对事件（否则两者交替会带来固定角度偏差）
+
+  // 已有绝对方向源时丢弃相对事件（两者交替会带来固定角度偏差）
   if (!isAbsolute && sawAbsolute) return;
+
+  // 绝对源可能存在但尚未上报：先等 2.5 秒，避免用相对值抢先显示错误方向
+  if (!isAbsolute && !sawAbsolute && performance.now() - compassStartAt < 2500) return;
+
+  // 安卓磁力计未初始化时会先抛出 0/0/0 的空值，直接丢弃，等真实数据
+  if (!hasWebkit && e.alpha === 0 && (e.beta || 0) === 0 && (e.gamma || 0) === 0){
+    if (!compassLive) $('heading').textContent = '校准中…';
+    return;
+  }
 
   let h = null, approx = false;
 
@@ -666,10 +686,22 @@ function onOrientation(e, fromAbsoluteEvent){
   if (now - lastCompass < 60) return;
   lastCompass = now;
   compassLive = true;
-  compassApprox = approx;
   state.ori = { a: Math.round(e.alpha || 0), b: Math.round(e.beta || 0), g: Math.round(e.gamma || 0) };
 
   const screenDeg = (h - screenAngle() + 360) % 360;
+
+  // 1) 数据源切换（相对 → 绝对）：立刻以新值为准
+  if (lastWasApprox !== null && lastWasApprox !== approx) resetSmoothing();
+  lastWasApprox = approx;
+
+  // 2) 开头几帧若与当前值差异很大，说明首帧是无效值，直接重置平滑
+  sampleCount++;
+  if (sampleCount <= 8 && guardDeg !== null){
+    const jump = Math.abs(((screenDeg - guardDeg + 540) % 360) - 180);
+    if (jump > 45) resetSmoothing();
+  }
+
+  compassApprox = approx;
   setHeading(smoothHeading(headingGuard(screenDeg)));
 }
 
