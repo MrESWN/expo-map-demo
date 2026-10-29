@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>展会地图</title>
+<style>
+  :root{
+    --bg:#0e1016; --card:#171a23; --card2:#1e2230; --line:#2a2f40;
+    --txt:#e8ebf2; --sub:#8b93a7; --acc:#2f7bff; --ok:#2fd08a; --warn:#ffb020; --err:#ff5c6c;
+    --pink:#fb7299;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--txt);display:flex;justify-content:center;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;overflow:hidden}
+  .phone{width:100%;max-width:440px;padding:9px 9px 12px;display:flex;flex-direction:column;gap:8px;height:100%}
+
+  .head{display:flex;align-items:center;justify-content:space-between;flex:0 0 auto}
+  .head h1{font-size:15px;margin:0;font-weight:600;display:flex;align-items:center;gap:7px}
+  .head h1::before{content:"";width:4px;height:14px;border-radius:2px;background:var(--pink)}
+  .badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;padding:5px 9px;border-radius:999px;
+    background:var(--card2);border:1px solid var(--line);color:var(--sub);white-space:nowrap}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--sub)}
+  .badge.ok{color:var(--ok);border-color:rgba(47,208,138,.35)} .badge.ok .dot{background:var(--ok);box-shadow:0 0 7px var(--ok)}
+  .badge.err{color:var(--err);border-color:rgba(255,92,108,.35)} .badge.err .dot{background:var(--err)}
+  .badge.lock{color:var(--warn);border-color:rgba(255,176,32,.35)} .badge.lock .dot{background:var(--warn)}
+  .badge.wait .dot{animation:blink 1s infinite}
+  @keyframes blink{50%{opacity:.2}}
+
+  /* 场地切换 */
+  .seg{display:flex;gap:6px;flex:0 0 auto}
+  .seg button{flex:1;border:1px solid var(--line);background:var(--card);color:var(--sub);font-size:11.5px;
+    padding:7px 6px;border-radius:10px;cursor:pointer;font-family:inherit;transition:.15s}
+  .seg button.on{background:rgba(251,114,153,.14);border-color:rgba(251,114,153,.55);color:var(--pink);font-weight:600}
+
+  .mapwrap{position:relative;border-radius:16px;overflow:hidden;border:1px solid var(--line);
+    background:#e9eef5;flex:1 1 auto;min-height:200px;cursor:grab;touch-action:none}
+  .mapwrap:active{cursor:grabbing}
+  #tiles{position:absolute;inset:0;overflow:hidden}
+  #tiles img{position:absolute;width:256px;height:256px;user-select:none;-webkit-user-drag:none;pointer-events:none;left:0;top:0;will-change:transform}
+
+  #overlayImg{position:absolute;left:0;top:0;pointer-events:none;opacity:.9;display:none;transform-origin:0 0}
+  #routeSvg{position:absolute;inset:0;pointer-events:none;display:none;overflow:visible}
+
+  #fence{position:absolute;left:0;top:0;border-radius:50%;border:1.5px dashed rgba(251,114,153,.65);
+    background:rgba(251,114,153,.05);pointer-events:none;transform:translate(-50%,-50%)}
+  #dest{position:absolute;left:0;top:0;pointer-events:none;transform:translate(-50%,-100%);display:none;z-index:6}
+  #dest .pin{font-size:20px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.4))}
+
+  #accCircle{position:absolute;left:0;top:0;border-radius:50%;background:rgba(47,123,255,.14);
+    border:1.5px solid rgba(47,123,255,.85);pointer-events:none;transform:translate(-50%,-50%);display:none}
+  #marker{position:absolute;left:0;top:0;width:18px;height:18px;pointer-events:none;transform:translate(-50%,-50%);display:none;z-index:7}
+  #marker .core{width:18px;height:18px;border-radius:50%;background:var(--acc);border:3px solid #fff;
+    box-shadow:0 2px 8px rgba(0,0,0,.45);position:relative}
+  #marker .core::after{content:"";position:absolute;inset:-9px;border-radius:50%;background:rgba(47,123,255,.35);
+    animation:ripple 2s ease-out infinite}
+  @keyframes ripple{0%{transform:scale(.4);opacity:.9}100%{transform:scale(1.9);opacity:0}}
+
+  /* 点位上的朝向扇形 + 实心箭头 */
+  #marker .dir{position:absolute;left:50%;top:50%;width:88px;height:88px;margin:-44px 0 0 -44px;
+    transform-origin:50% 50%;pointer-events:none;display:none;transition:transform .1s linear;overflow:visible}
+  #marker.has-heading .dir{display:block}
+  #marker .dir .cone{fill:rgba(47,123,255,.25)}
+  #marker .dir .tip{fill:#2f7bff;stroke:#fff;stroke-width:3;stroke-linejoin:round}
+  #marker.locked .core{background:#8b93a7}
+  #marker.locked .core::after{display:none}
+  #marker.locked .dir .cone{fill:rgba(139,147,167,.25)}
+  #marker.locked .dir .tip{fill:#8b93a7}
+
+  .lockmask{position:absolute;inset:0;z-index:24;display:none;align-items:center;justify-content:center;
+    background:rgba(10,12,18,.5);backdrop-filter:blur(2px) saturate(.7)}
+  .lockcard{width:76%;max-width:290px;background:rgba(23,26,35,.97);border:1px solid var(--line);
+    border-radius:16px;padding:16px;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+  .lockicon{font-size:22px;margin-bottom:4px}
+  .lockcard h3{margin:0 0 6px;font-size:14px;font-weight:600}
+  .lockcard p{margin:0;font-size:11.5px;color:var(--sub);line-height:1.6}
+  .lockbar{height:4px;background:var(--card2);border-radius:3px;overflow:hidden;margin:12px 0 8px}
+  .lockbar i{display:block;height:100%;width:0;background:var(--pink);transition:width .4s}
+  .dist{font-family:"SF Mono",Consolas,monospace;font-size:17px;color:var(--pink);margin-bottom:2px}
+  .simbtn{margin-top:10px;border:1px solid var(--line);background:var(--card2);color:var(--sub);
+    font-size:10.5px;padding:6px 10px;border-radius:8px;cursor:pointer;font-family:inherit}
+  .simbtn:hover{color:var(--txt);border-color:#3a4155}
+
+  .fab{position:absolute;right:9px;bottom:9px;width:42px;height:42px;border-radius:13px;border:0;
+    background:rgba(23,26,35,.93);color:var(--txt);font-size:16px;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;box-shadow:0 4px 14px rgba(0,0,0,.45);transition:.15s;z-index:30}
+  .fab:hover,.fab.on{background:var(--acc)}
+  .zoombox{position:absolute;left:9px;bottom:9px;display:flex;flex-direction:column;border-radius:11px;overflow:hidden;
+    box-shadow:0 4px 14px rgba(0,0,0,.45);z-index:30}
+  .zoombox button{width:34px;height:34px;border:0;background:rgba(23,26,35,.93);color:var(--txt);font-size:16px;cursor:pointer}
+  .zoombox button:hover{background:var(--acc)}
+  .maptoggle{position:absolute;left:9px;top:9px;z-index:30;border-radius:9px;padding:6px 10px;
+    font-size:11px;background:rgba(23,26,35,.9);color:var(--sub);border:1px solid var(--line);cursor:pointer;font-family:inherit}
+  .maptoggle.on{color:var(--pink);border-color:rgba(251,114,153,.55);background:rgba(251,114,153,.14)}
+  .attr{position:absolute;right:6px;bottom:5px;font-size:9px;color:#5d6478;background:rgba(255,255,255,.6);
+    padding:2px 5px;border-radius:4px;z-index:5}
+
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:10px 12px;flex:0 0 auto}
+  .row3{display:flex;gap:7px}
+  .row3 > div{flex:1;background:var(--card2);border-radius:10px;padding:6px 9px;min-width:0}
+  .k{font-size:10px;color:var(--sub);margin-bottom:2px}
+  .v{font-family:"SF Mono",Consolas,monospace;font-size:13px;font-variant-numeric:tabular-nums;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .navbtn{margin-top:9px;width:100%;border:0;border-radius:12px;padding:12px;font-size:14px;font-weight:600;
+    background:linear-gradient(135deg,#fb7299,#ff9db5);color:#fff;cursor:pointer;font-family:inherit;
+    transition:.15s;opacity:.35;pointer-events:none}
+  .navbtn.active{opacity:1;pointer-events:auto}
+  .navbtn:active{transform:scale(.99)}
+  .dbg{font-family:"SF Mono",Consolas,monospace;font-size:9.5px;color:var(--sub);margin-top:6px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .err{color:var(--err);font-size:11px;line-height:1.5;margin-top:6px;display:none}
+  .toast{position:fixed;left:50%;top:46%;transform:translate(-50%,-50%) scale(.92);background:rgba(47,208,138,.96);
+    color:#06231a;font-size:13px;font-weight:600;padding:10px 18px;border-radius:12px;opacity:0;
+    pointer-events:none;transition:.25s;z-index:99;max-width:80%;text-align:center;line-height:1.5}
+  .toast.show{opacity:1;transform:translate(-50%,-50%) scale(1)}
+</style>
+</head>
+<body>
+<div class="phone">
+  <div class="head">
+    <h1>展会地图</h1>
+    <span id="status" class="badge"><span class="dot"></span><span id="statusText">初始化</span></span>
+  </div>
+
+  <div class="seg">
+    <button id="segNECC" class="on">国家会展中心（正式）</button>
+    <button id="segDemo">国正中心（演示）</button>
+  </div>
+
+  <div class="mapwrap" id="mapwrap">
+    <div id="tiles"></div>
+    <img id="overlayImg" alt="" />
+    <svg id="routeSvg"><path id="routePath" fill="none" stroke="#fb7299" stroke-width="5"
+      stroke-linecap="round" stroke-dasharray="11 9" opacity="0.95"/></svg>
+    <div id="fence"></div>
+    <div id="dest"><div class="pin">📍</div></div>
+    <div id="accCircle"></div>
+    <div id="marker">
+      <svg class="dir" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+        <path class="cone" d="M50 50 L24 12 L76 12 Z"/>
+        <path class="tip" d="M50 4 L63 30 L50 24 L37 30 Z"/>
+      </svg>
+      <div class="core"></div>
+    </div>
+
+    <button class="maptoggle" id="btnOverlay">展会图 · 开</button>
+
+    <div class="lockmask" id="lockmask">
+      <div class="lockcard">
+        <div class="lockicon" id="lockicon">🔒</div>
+        <div class="dist" id="lockDist">-- m</div>
+        <h3 id="lockTitle">未进入展区</h3>
+        <p id="lockHint">进入场馆周边范围后自动解锁</p>
+        <div class="lockbar"><i id="lockBar"></i></div>
+        <button class="simbtn" id="btnSim">定位不准？点此模拟进入（调试）</button>
+      </div>
+    </div>
+
+    <div class="attr" id="attr">© 高德地图</div>
+    <button id="btnFollow" class="fab on" title="回到我的位置">◎</button>
+    <div class="zoombox">
+      <button id="btnZoomIn">+</button>
+      <button id="btnZoomOut">−</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="row3">
+      <div><div class="k">距场馆</div><div class="v" id="dist">--</div></div>
+      <div><div class="k">精度</div><div class="v" id="acc">--</div></div>
+      <div><div class="k">朝向</div><div class="v" id="heading">--</div></div>
+    </div>
+    <button class="navbtn" id="btnNav">开始导航</button>
+    <div class="dbg" id="dbg">正在获取定位…</div>
+    <div class="err" id="err"></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+'use strict';
+const $ = id => document.getElementById(id);
+
+/* ==================================================================
+   配置
+   ================================================================== */
+const CONFIG = {
+  venues: [
+    { id:'necc', name:'国家会展中心', short:'国家会展中心',
+      lat: 31.1937, lng: 121.3058, radius: 1200 },
+    { id:'demo', name:'上海凯德国正中心', short:'国正中心（演示）',
+      lat: 31.3109033, lng: 121.5015148, radius: 800 }
+  ],
+  activeVenue: 'demo',          // 你现在在国正中心，先默认演示场地；正式上线改成 'necc'
+
+  window: { start:'2026-10-29T00:00:00+08:00', end:'2026-11-01T00:00:00+08:00' },
+
+  overlaySpanMeters: 520,       // 展会底图覆盖的边长（米）
+  overlayUrl: '',               // 填你的展会平面图地址；留空用内置示例图
+  lockShowsSelf: true,          // 未解锁时显示灰色自身点位（调试用）
+  routeEnabled: true            // 展示路径（对接已有规划能力的占位）
+};
+
+/* ==================================================================
+   坐标系 / 投影
+   ================================================================== */
+const PI = Math.PI, A = 6378245.0, EE = 0.00669342162296594323;
+const outOfChina = (lng, lat) => !(lng > 73.66 && lng < 135.05 && lat > 3.86 && lat < 53.55);
+function tLat(x, y){
+  let r = -100 + 2*x + 3*y + .2*y*y + .1*x*y + .2*Math.sqrt(Math.abs(x));
+  r += (20*Math.sin(6*x*PI) + 20*Math.sin(2*x*PI)) * 2/3;
+  r += (20*Math.sin(y*PI) + 40*Math.sin(y/3*PI)) * 2/3;
+  r += (160*Math.sin(y/12*PI) + 320*Math.sin(y*PI/30)) * 2/3;
+  return r;
+}
+function tLng(x, y){
+  let r = 300 + x + 2*y + .1*x*x + .1*x*y + .1*Math.sqrt(Math.abs(x));
+  r += (20*Math.sin(6*x*PI) + 20*Math.sin(2*x*PI)) * 2/3;
+  r += (20*Math.sin(x*PI) + 40*Math.sin(x/3*PI)) * 2/3;
+  r += (150*Math.sin(x/12*PI) + 300*Math.sin(x/30*PI)) * 2/3;
+  return r;
+}
+function wgs2gcj(lng, lat){
+  if (outOfChina(lng, lat)) return [lng, lat];
+  let dLat = tLat(lng - 105, lat - 35), dLng = tLng(lng - 105, lat - 35);
+  const rad = lat / 180 * PI;
+  let m = Math.sin(rad); m = 1 - EE * m * m;
+  const s = Math.sqrt(m);
+  dLat = dLat * 180 / ((A * (1 - EE)) / (m * s) * PI);
+  dLng = dLng * 180 / (A / s * Math.cos(rad) * PI);
+  return [lng + dLng, lat + dLat];
+}
+function gcj2wgs(lng, lat){
+  let w = [lng, lat];
+  for (let i = 0; i < 6; i++){
+    const g = wgs2gcj(w[0], w[1]);
+    w[0] += lng - g[0]; w[1] += lat - g[1];
+  }
+  return w;
+}
+
+const TILE = 256;
+const worldSize = z => TILE * Math.pow(2, z);
+const lng2x = (lng, z) => (lng + 180) / 360 * worldSize(z);
+const x2lng = (x, z) => x / worldSize(z) * 360 - 180;
+function lat2y(lat, z){
+  const s = Math.sin(lat * PI / 180);
+  return (0.5 - Math.log((1 + s) / (1 - s)) / (4 * PI)) * worldSize(z);
+}
+function y2lat(y, z){
+  const n = PI - 2 * PI * y / worldSize(z);
+  return 180 / PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
+}
+const mpp = (lat, z) => 156543.03392 * Math.cos(lat * PI / 180) / Math.pow(2, z);
+
+function distanceMeters(lat1, lng1, lat2, lng2){
+  const R = 6371000, rad = PI / 180;
+  const dLat = (lat2 - lat1) * rad, dLng = (lng2 - lng1) * rad;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*rad) * Math.cos(lat2*rad) * Math.sin(dLng/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+/* ==================================================================
+   状态
+   ================================================================== */
+const state = {
+  mode:'gcj', center:null, z:15, follow:true,
+  fix:null, heading:null, unlocked:false, overlayOn:true,
+  routeOn:false, inWindow:true, onPage:true, forced:false,
+  venueIdx: 0
+};
+state.venueIdx = Math.max(0, CONFIG.venues.findIndex(v => v.id === CONFIG.activeVenue));
+const venue = () => CONFIG.venues[state.venueIdx];
+state.center = applyCRS(venue().lng, venue().lat);
+
+function applyCRS(lng, lat){
+  const p = state.mode === 'gcj' ? wgs2gcj(lng, lat) : [lng, lat];
+  return { lng: p[0], lat: p[1] };
+}
+function undoCRS(lng, lat){
+  const p = state.mode === 'gcj' ? gcj2wgs(lng, lat) : [lng, lat];
+  return { lng: p[0], lat: p[1] };
+}
+
+/* ==================================================================
+   瓦片
+   ================================================================== */
+const tileEls = new Map();
+let tileErrors = 0;
+const tilesBox = $('tiles');
+const URLS = {
+  gcj:(x,y,z)=>`https://webrd0${(x+y)%4+1}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x=${x}&y=${y}&z=${z}`,
+  wgs:(x,y,z)=>`https://tile.openstreetmap.org/${z}/${x}/${y}.png`
+};
+function getTile(x, y, z){
+  const key = z + '/' + x + '/' + y;
+  let el = tileEls.get(key);
+  if (el) return el;
+  el = document.createElement('img');
+  el.alt = '';
+  el.src = URLS[state.mode](x, y, z);
+  el.onerror = () => { if (++tileErrors === 4 && state.mode === 'gcj') switchMode('wgs'); };
+  tileEls.set(key, el);
+  tilesBox.appendChild(el);
+  return el;
+}
+function switchMode(mode){
+  if (state.mode === mode) return;
+  const w = undoCRS(state.center.lng, state.center.lat);
+  state.mode = mode;
+  state.center = applyCRS(w.lng, w.lat);
+  tileEls.forEach(el => el.remove()); tileEls.clear(); tileErrors = 0;
+  $('attr').textContent = mode === 'gcj' ? '© 高德地图' : '© OpenStreetMap';
+  render();
+}
+
+/* ==================================================================
+   示例展会底图
+   ================================================================== */
+function buildSampleOverlay(){
+  const svg = `
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="900" viewBox="0 0 900 900">
+  <rect x="20" y="20" width="860" height="860" rx="24" fill="#f4f1ea" stroke="#c9bfa8" stroke-width="6"/>
+  <g fill="#ffe3ec" stroke="#fb7299" stroke-width="5">
+    <rect x="70"  y="90"  width="330" height="250" rx="10"/>
+    <rect x="430" y="90"  width="400" height="160" rx="10"/>
+    <rect x="430" y="280" width="400" height="240" rx="10"/>
+    <rect x="70"  y="370" width="330" height="180" rx="10"/>
+    <rect x="70"  y="590" width="760" height="170" rx="10"/>
+  </g>
+  <g font-family="sans-serif" font-size="34" fill="#c2185b" text-anchor="middle" font-weight="700">
+    <text x="235" y="230">A1 馆</text>
+    <text x="630" y="185">B1 馆</text>
+    <text x="630" y="415">B2 馆</text>
+    <text x="235" y="475">A2 馆</text>
+    <text x="450" y="690">主舞台 · 中庭</text>
+  </g>
+  <g stroke="#2f7bff" stroke-width="10" stroke-dasharray="20 14" fill="none" opacity="0.45">
+    <path d="M450 340 L450 900"/><path d="M0 560 L900 560"/>
+  </g>
+  <g font-family="sans-serif" font-size="20" fill="#8d7f63">
+    <text x="60" y="70">示例展会平面图 · 替换 CONFIG.overlayUrl</text>
+    <text x="640" y="850" text-anchor="end">入口 ↗</text>
+  </g>
+</svg>`;
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+}
+
+function venueBBox(spanM){
+  const v = venue();
+  const dLat = spanM / 2 / 111320;
+  const dLng = spanM / 2 / (111320 * Math.cos(v.lat * PI / 180));
+  return { north: v.lat + dLat, south: v.lat - dLat, east: v.lng + dLng, west: v.lng - dLng };
+}
+
+/* ==================================================================
+   渲染
+   ================================================================== */
+let raf = null;
+function scheduleRender(){ if (!raf) raf = requestAnimationFrame(() => { raf = null; render(); }); }
+
+function render(){
+  const wrap = $('mapwrap');
+  const W = wrap.clientWidth, H = wrap.clientHeight;
+  if (!W || !H) return;
+  const z = state.z;
+  const cx = lng2x(state.center.lng, z), cy = lat2y(state.center.lat, z);
+  const left = cx - W / 2, top = cy - H / 2;
+
+  const n = Math.pow(2, z);
+  const x0 = Math.floor(left / TILE), x1 = Math.floor((left + W) / TILE);
+  const y0 = Math.floor(top / TILE), y1 = Math.floor((top + H) / TILE);
+  const alive = new Set();
+  for (let tx = x0; tx <= x1; tx++){
+    for (let ty = y0; ty <= y1; ty++){
+      if (ty < 0 || ty >= n) continue;
+      const wx = ((tx % n) + n) % n;
+      const el = getTile(wx, ty, z);
+      alive.add(z + '/' + wx + '/' + ty);
+      el.style.transform = `translate3d(${tx*TILE - left}px, ${ty*TILE - top}px, 0)`;
+    }
+  }
+  tileEls.forEach((el, key) => { if (!alive.has(key)) { el.remove(); tileEls.delete(key); } });
+
+  const v = venue();
+  const vp = applyCRS(v.lng, v.lat);
+  const fx = lng2x(vp.lng, z) - left, fy = lat2y(vp.lat, z) - top;
+
+  // 围栏
+  const fr = v.radius / mpp(v.lat, z);
+  const fence = $('fence');
+  fence.style.width = fence.style.height = (fr * 2) + 'px';
+  fence.style.transform = `translate(${fx - fr}px, ${fy - fr}px)`;
+
+  // 目的地图钉
+  const dest = $('dest');
+  if (state.routeOn){ dest.style.display = 'block'; dest.style.transform = `translate(${fx}px, ${fy}px) translate(-50%,-100%)`; }
+  else dest.style.display = 'none';
+
+  // 展会底图
+  const ov = $('overlayImg');
+  if (state.overlayOn && state.inWindow){
+    const b = venueBBox(CONFIG.overlaySpanMeters);
+    const p1 = applyCRS(b.west, b.north), p2 = applyCRS(b.east, b.south);
+    const ax = lng2x(p1.lng, z) - left, ay = lat2y(p1.lat, z) - top;
+    const bx = lng2x(p2.lng, z) - left, by = lat2y(p2.lat, z) - top;
+    ov.style.display = 'block';
+    ov.style.transform = `translate3d(${ax}px, ${ay}px, 0)`;
+    ov.style.width = Math.abs(bx - ax) + 'px';
+    ov.style.height = Math.abs(by - ay) + 'px';
+  } else {
+    ov.style.display = 'none';
+  }
+
+  // 自身点位
+  const showSelf = state.fix && (state.unlocked || CONFIG.lockShowsSelf);
+  let mx = null, my = null;
+  if (showSelf){
+    const p = applyCRS(state.fix.lng, state.fix.lat);
+    mx = lng2x(p.lng, z) - left; my = lat2y(p.lat, z) - top;
+    const mk = $('marker');
+    mk.classList.toggle('locked', !state.unlocked);
+    mk.style.display = 'block';
+    mk.style.transform = `translate(${mx}px, ${my}px) translate(-50%,-50%)`;
+    if (state.unlocked){
+      const r = Math.max(6, (state.fix.acc || 30) / mpp(p.lat, z));
+      const c = $('accCircle');
+      c.style.display = 'block';
+      c.style.width = c.style.height = (r * 2) + 'px';
+      c.style.transform = `translate(${mx - r}px, ${my - r}px)`;
+    } else {
+      $('accCircle').style.display = 'none';
+    }
+  } else {
+    $('marker').style.display = 'none';
+    $('accCircle').style.display = 'none';
+  }
+
+  // 路径
+  const svg = $('routeSvg');
+  if (state.routeOn && mx !== null){
+    const midX = (mx + fx) / 2, midY = (my + fy) / 2 - 40;
+    $('routePath').setAttribute('d', `M ${mx} ${my} Q ${midX} ${midY} ${fx} ${fy}`);
+    svg.style.display = 'block';
+  } else {
+    svg.style.display = 'none';
+  }
+}
+
+/* ==================================================================
+   罗盘
+   ================================================================== */
+const CARD = ['北','东北','东','东南','南','西南','西','西北'];
+const cardinal = d => CARD[Math.round((((d % 360) + 360) % 360) / 45) % 8];
+
+function setHeading(deg){
+  state.heading = deg;
+  const mk = $('marker');
+  const dir = mk.querySelector('.dir');
+  if (deg === null || deg === undefined){
+    $('heading').textContent = '--';
+    mk.classList.remove('has-heading');
+    return;
+  }
+  $('heading').textContent = (compassApprox ? '≈' : '') + Math.round(deg) + '° ' + cardinal(deg);
+  if (dir) dir.style.transform = `rotate(${deg}deg)`;
+  mk.classList.add('has-heading');
+}
+
+let lastCompass = 0, compassApprox = false;
+
+/* 带倾角补偿的罗盘角：手机立着拿也能算对，不只是平放时 */
+function tiltCompensatedHeading(alpha, beta, gamma){
+  const rad = PI / 180;
+  const _x = beta * rad, _y = gamma * rad, _z = alpha * rad;
+  const cX = Math.cos(_x), cY = Math.cos(_y), cZ = Math.cos(_z);
+  const sX = Math.sin(_x), sY = Math.sin(_y), sZ = Math.sin(_z);
+  const Vx = -cZ * sY - sZ * sX * cY;
+  const Vy = -sZ * sY + cZ * sX * cY;
+  let h = Math.atan2(Vx, Vy) * 180 / PI;
+  if (h < 0) h += 360;
+  return h;
+}
+
+/* 屏幕横竖屏会改变“屏幕上方”对应的物理方向，需要扣掉 */
+function screenAngle(){
+  if (screen.orientation && typeof screen.orientation.angle === 'number') return screen.orientation.angle;
+  if (typeof window.orientation === 'number') return (window.orientation + 360) % 360;
+  return 0;
+}
+
+function onOrientation(e){
+  let h = null, approx = false;
+
+  if (typeof e.webkitCompassHeading === 'number' && !isNaN(e.webkitCompassHeading)
+      && e.webkitCompassHeading >= 0){
+    h = e.webkitCompassHeading;                                   // iOS：已经是真北
+  } else if (typeof e.alpha === 'number'){
+    const beta = e.beta || 0;
+    // 平放时公式退化，直接用 alpha；立着/斜着拿用倾角补偿公式
+    h = Math.abs(beta) < 8 ? ((360 - e.alpha) % 360)
+                           : tiltCompensatedHeading(e.alpha, beta, e.gamma || 0);
+    approx = !e.absolute;                                          // 非绝对方向 → 相对朝向
+  }
+
+  if (h === null) return;
+  const now = performance.now();
+  if (now - lastCompass < 60) return;
+  lastCompass = now;
+  compassLive = true;
+  compassApprox = approx;
+  state.ori = { a: Math.round(e.alpha || 0), b: Math.round(e.beta || 0), g: Math.round(e.gamma || 0) };
+  setHeading((h - screenAngle() + 360) % 360);
+}
+
+let compassLive = false, compassStarted = false;
+function startCompass(){
+  if (compassStarted) return;
+  const needPerm = typeof DeviceOrientationEvent !== 'undefined' &&
+                   typeof DeviceOrientationEvent.requestPermission === 'function';
+  if (!needPerm){
+    compassStarted = true;
+    window.addEventListener('deviceorientationabsolute', onOrientation, true);
+    window.addEventListener('deviceorientation', onOrientation, true);
+    return;
+  }
+  // iOS 13+：权限必须在用户手势里申请，借首次触摸触发一次
+  document.addEventListener('pointerdown', function once(){
+    DeviceOrientationEvent.requestPermission().then(r => {
+      if (r === 'granted'){
+        compassStarted = true;
+        window.addEventListener('deviceorientation', onOrientation, true);
+      }
+    }).catch(() => {});
+  }, { once: true });
+}
+
+/* ==================================================================
+   状态栏
+   ================================================================== */
+function setStatus(cls, txt){
+  $('status').className = 'badge ' + cls;
+  $('statusText').textContent = txt;
+}
+function showErr(msg){
+  $('err').textContent = msg || '';
+  $('err').style.display = msg ? 'block' : 'none';
+}
+function toast(msg){
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.classList.remove('show'), 1900);
+}
+
+/* ==================================================================
+   定位 & 解锁
+   ================================================================== */
+let watchId = null;
+const OPTS = { enableHighAccuracy:true, timeout:20000, maximumAge:0 };
+
+function onFix(pos){
+  const c = pos.coords;
+  state.fix = { lng:c.longitude, lat:c.latitude, acc:c.accuracy, speed:c.speed, heading:c.heading };
+  const v = venue();
+  const d = distanceMeters(c.latitude, c.longitude, v.lat, v.lng);
+
+  $('dist').textContent = d >= 1000 ? (d/1000).toFixed(2) + ' km' : Math.round(d) + ' m';
+  $('acc').textContent = c.accuracy ? '±' + Math.round(c.accuracy) + 'm' : '--';
+  const o = state.ori;
+  $('dbg').textContent = `${c.latitude.toFixed(5)}, ${c.longitude.toFixed(5)} · ±${Math.round(c.accuracy||0)}m`
+    + (o ? ` · α${o.a} β${o.b} γ${o.g}` : '');
+
+  // 没有罗盘时用 GPS 行进方向兜底
+  if (!compassLive && c.heading !== null && c.heading !== undefined && (c.speed || 0) > 0.6){
+    setHeading(c.heading);
+  }
+
+  updateLock(d, v);
+
+  if (state.follow && state.unlocked){
+    state.center = applyCRS(c.longitude, c.latitude);
+  }
+  scheduleRender();
+}
+
+function updateLock(d, v){
+  const reach = Math.max(0, d - v.radius);
+  $('lockDist').textContent = d >= 1000 ? (d/1000).toFixed(2) + ' km' : Math.round(d) + ' m';
+  $('lockBar').style.width = Math.max(4, Math.min(100, 100 - Math.min(100, reach/20))) + '%';
+
+  const should = state.forced || d <= v.radius;
+  if (should === state.unlocked){
+    if (!should) $('lockHint').textContent = `进入 ${v.name} 周边 ${v.radius} m 内自动解锁`;
+    return;
+  }
+  state.unlocked = should;
+
+  $('lockmask').style.display = should ? 'none' : 'flex';
+  $('btnNav').classList.toggle('active', should);
+  $('lockTitle').textContent = should ? '已解锁' : '未进入展区';
+  $('lockicon').textContent = should ? '✅' : '🔒';
+
+  if (should){
+    state.z = Math.max(state.z, 18);
+    if (state.fix){
+      state.center = applyCRS(state.fix.lng, state.fix.lat);
+      state.follow = true;
+      $('btnFollow').classList.add('on');
+    }
+    setStatus('ok', '已进入展区');
+    toast('已进入 ' + v.name + ' 展区，地图已解锁');
+    startCompass();
+  } else {
+    setStatus('lock', '未进入展区');
+    $('lockHint').textContent = `进入 ${v.name} 周边 ${v.radius} m 内自动解锁`;
+    state.routeOn = false;
+  }
+  scheduleRender();
+}
+
+function onErr(e){
+  const map = {1:'定位权限被拒绝。请在浏览器设置里允许位置后刷新。',
+               2:'无法获取位置，请确认设备定位服务已开启。',
+               3:'定位超时，请靠近窗边或室外后重试。'};
+  showErr('⚠ ' + (map[e.code] || e.message || '未知错误'));
+  setStatus('err', '定位失败');
+}
+
+function startWatch(){
+  if (watchId !== null) return;
+  watchId = navigator.geolocation.watchPosition(onFix, onErr, OPTS);
+}
+function stopWatch(){
+  if (watchId === null) return;
+  navigator.geolocation.clearWatch(watchId);
+  watchId = null;
+}
+
+/* 只在活动页面可见时定位 */
+function syncVisibility(){
+  const visible = document.visibilityState === 'visible';
+  state.onPage = visible;
+  if (visible){
+    startWatch();
+    setStatus(state.fix ? (state.unlocked ? 'ok' : 'lock') : 'wait',
+              state.fix ? (state.unlocked ? '已进入展区' : '未进入展区') : '定位中…');
+  } else {
+    stopWatch();
+    setStatus('', '已离开页面 · 暂停定位');
+    state.routeOn = false;
+    scheduleRender();
+  }
+  updateNavBtn();
+}
+
+function updateNavBtn(){
+  const ok = state.unlocked && state.onPage && state.inWindow;
+  $('btnNav').classList.toggle('active', ok);
+  $('btnNav').textContent = state.routeOn ? '结束导航' : '开始导航';
+}
+
+/* ==================================================================
+   场地切换
+   ================================================================== */
+function switchVenue(idx){
+  if (idx === state.venueIdx) return;
+  state.venueIdx = idx;
+  const v = venue();
+  state.unlocked = false;
+  state.forced = false;
+  state.routeOn = false;
+  state.z = 15;
+  state.follow = true;
+  state.center = applyCRS(v.lng, v.lat);
+  $('lockmask').style.display = 'flex';
+  $('lockTitle').textContent = '未进入展区';
+  $('lockicon').textContent = '🔒';
+  $('lockHint').textContent = `进入 ${v.name} 周边 ${v.radius} m 内自动解锁`;
+  $('segNECC').classList.toggle('on', v.id === 'necc');
+  $('segDemo').classList.toggle('on', v.id === 'demo');
+  $('dbg').textContent = '正在获取定位…';
+  updateNavBtn();
+  if (state.fix){
+    const d = distanceMeters(state.fix.lat, state.fix.lng, v.lat, v.lng);
+    updateLock(d, v);
+  }
+  scheduleRender();
+}
+
+/* ==================================================================
+   交互
+   ================================================================== */
+const wrap = $('mapwrap');
+let dragging = false, lastX = 0, lastY = 0;
+
+wrap.addEventListener('pointerdown', e => {
+  if (e.target.closest('.fab') || e.target.closest('.zoombox') ||
+      e.target.closest('.maptoggle') || e.target.closest('.compass')) return;
+  dragging = true; lastX = e.clientX; lastY = e.clientY;
+  wrap.setPointerCapture(e.pointerId);
+});
+wrap.addEventListener('pointermove', e => {
+  if (!dragging) return;
+  const dx = e.clientX - lastX, dy = e.clientY - lastY;
+  lastX = e.clientX; lastY = e.clientY;
+  const z = state.z;
+  state.center = { lng: x2lng(lng2x(state.center.lng, z) - dx, z),
+                   lat: y2lat(lat2y(state.center.lat, z) - dy, z) };
+  if (Math.abs(dx) + Math.abs(dy) > 2){ state.follow = false; $('btnFollow').classList.remove('on'); }
+  scheduleRender();
+});
+wrap.addEventListener('pointerup', e => { dragging = false; try{ wrap.releasePointerCapture(e.pointerId); }catch(_){} });
+wrap.addEventListener('pointercancel', () => dragging = false);
+wrap.addEventListener('wheel', e => {
+  e.preventDefault();
+  zoomAt(e.deltaY > 0 ? -1 : 1, e.clientX, e.clientY);
+}, { passive:false });
+
+function zoomAt(dir, px, py){
+  const W = wrap.clientWidth, H = wrap.clientHeight, rect = wrap.getBoundingClientRect();
+  const ox = (px === undefined ? W/2 : px - rect.left), oy = (py === undefined ? H/2 : py - rect.top);
+  const z0 = state.z, z1 = Math.max(3, Math.min(19, z0 + dir));
+  if (z1 === z0) return;
+  const lng = x2lng(lng2x(state.center.lng, z0) - W/2 + ox, z0);
+  const lat = y2lat(lat2y(state.center.lat, z0) - H/2 + oy, z0);
+  state.z = z1;
+  state.center = { lng: x2lng(lng2x(lng, z1) - ox + W/2, z1),
+                   lat: y2lat(lat2y(lat, z1) - oy + H/2, z1) };
+  scheduleRender();
+}
+$('btnZoomIn').addEventListener('click', () => zoomAt(1));
+$('btnZoomOut').addEventListener('click', () => zoomAt(-1));
+
+$('btnFollow').addEventListener('click', () => {
+  state.follow = true;
+  $('btnFollow').classList.add('on');
+  if (state.fix) state.center = applyCRS(state.fix.lng, state.fix.lat);
+  else state.center = applyCRS(venue().lng, venue().lat);
+  scheduleRender();
+});
+
+$('btnOverlay').addEventListener('click', () => {
+  state.overlayOn = !state.overlayOn;
+  $('btnOverlay').textContent = state.overlayOn ? '展会图 · 开' : '展会图 · 关';
+  $('btnOverlay').classList.toggle('on', state.overlayOn);
+  scheduleRender();
+});
+
+/* 导航：只在活动页面内、已解锁时可用 */
+$('btnNav').addEventListener('click', () => {
+  if (!state.onPage){ showErr('请回到活动页面后再使用导航'); return; }
+  if (!state.unlocked){ showErr('进入展区后才能使用导航'); return; }
+
+  if (state.routeOn){
+    state.routeOn = false;
+    updateNavBtn();
+    scheduleRender();
+    return;
+  }
+
+  state.routeOn = true;
+  updateNavBtn();
+  const v = venue();
+  const d = state.fix ? distanceMeters(state.fix.lat, state.fix.lng, v.lat, v.lng) : 0;
+  toast(`调用路径规划 · ${v.name} · 约 ${d < 1000 ? Math.round(d) + ' m' : (d/1000).toFixed(1) + ' km'}`);
+
+  // 对接已有路径规划能力：拿到真实路线后替换这条占位连线
+  if (typeof window.ExpoMap_RoutePlan === 'function'){
+    window.ExpoMap_RoutePlan({ from: state.fix, to: v });
+  }
+  scheduleRender();
+});
+
+$('segNECC').addEventListener('click', () => switchVenue(0));
+$('segDemo').addEventListener('click', () => switchVenue(1));
+
+$('btnSim').addEventListener('click', () => {
+  state.forced = true;
+  state.unlocked = true;
+  const v = venue();
+  $('lockmask').style.display = 'none';
+  state.z = 18;
+  state.follow = true;
+  state.center = applyCRS(state.fix ? state.fix.lng : v.lng, state.fix ? state.fix.lat : v.lat);
+  $('btnNav').classList.add('active');
+  setStatus('ok', '演示解锁');
+  startCompass();
+  updateNavBtn();
+  toast('已模拟进入 ' + v.name);
+  scheduleRender();
+});
+
+/* ==================================================================
+   启动
+   ================================================================== */
+function setWindowState(){
+  const now = Date.now();
+  const s = new Date(CONFIG.window.start).getTime();
+  const e = new Date(CONFIG.window.end).getTime();
+  if (now < s) return 'before';
+  if (now > e) return 'after';
+  return 'open';
+}
+
+function boot(){
+  const w = setWindowState();
+  if (w !== 'open'){
+    state.inWindow = false;
+    $('overlayImg').style.display = 'none';
+    $('lockmask').style.display = 'flex';
+    $('lockicon').textContent = '⏰';
+    $('lockTitle').textContent = w === 'before' ? '活动未开始' : '活动已结束';
+    $('lockDist').textContent = '';
+    $('lockHint').textContent = w === 'before'
+      ? `地图定位将于 ${CONFIG.window.start.slice(0,10)} 开放`
+      : '本次活动地图已关闭';
+    $('lockBar').style.display = 'none';
+    setStatus('', w === 'before' ? '未开始' : '已结束');
+    updateNavBtn();
+    render();
+    return;
+  }
+
+  // 底图先加载
+  $('overlayImg').src = CONFIG.overlayUrl || buildSampleOverlay();
+  $('btnOverlay').classList.add('on');
+
+  $('segNECC').classList.toggle('on', venue().id === 'necc');
+  $('segDemo').classList.toggle('on', venue().id === 'demo');
+  $('lockmask').style.display = 'flex';
+  $('lockDist').textContent = '-- m';
+  $('lockHint').textContent = `进入 ${venue().name} 周边 ${venue().radius} m 内自动解锁`;
+
+  setStatus('wait', '定位中…');
+  updateNavBtn();
+  render();
+  requestAnimationFrame(render);
+  startCompass();
+  syncVisibility();
+
+  setTimeout(() => {
+    if (!state.fix) $('dbg').textContent = '仍未取得定位：请确认已允许位置权限、且设备定位已开启';
+    if (!compassLive && state.heading === null){
+      $('heading').textContent = '无方向传感器';
+      toast('没检测到方向传感器：需要手机打开，iOS 要允许“运动与方向”');
+    }
+  }, 5000);
+}
+
+window.addEventListener('resize', scheduleRender);
+document.addEventListener('visibilitychange', syncVisibility);
+boot();
+})();
+</script>
+</body>
+</html>
