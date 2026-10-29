@@ -247,7 +247,7 @@ const CONFIG = {
        中心点按卫星图校准：主体约 900m × 950m，对角线约 1.3km
        半径 1500m 覆盖整个地块 + 步行 10 分钟范围 */
     { id:'necc', name:'国家会展中心', short:'国家会展中心',
-      lat: 31.1914, lng: 121.3039, radius: 1500, hyst: 150, span: 1200 },
+      lat: 31.1931, lng: 121.2966, radius: 1500, hyst: 150, span: 1200, rot: -30 },
 
     /* 凯德国正中心（演示场地，围栏尺寸与正式场地对齐，便于验证同一套判定） */
     { id:'demo', name:'上海凯德国正中心', short:'国正中心（演示）',
@@ -532,7 +532,8 @@ function render(){
     const ax = lng2x(p1.lng, z) - left, ay = lat2y(p1.lat, z) - top;
     const bx = lng2x(p2.lng, z) - left, by = lat2y(p2.lat, z) - top;
     ov.style.display = 'block';
-    ov.style.transform = `translate3d(${ax}px, ${ay}px, 0)`;
+    ov.style.transformOrigin = '50% 50%';
+    ov.style.transform = `translate3d(${ax}px, ${ay}px, 0) rotate(${venue().rot || 0}deg)`;
     ov.style.width = Math.abs(bx - ax) + 'px';
     ov.style.height = Math.abs(by - ay) + 'px';
   } else {
