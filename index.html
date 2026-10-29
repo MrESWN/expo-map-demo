@@ -17,6 +17,11 @@
   .phone{width:100%;max-width:440px;padding:9px 9px 12px;display:flex;flex-direction:column;gap:8px;height:100%}
 
   .head{display:flex;align-items:center;justify-content:space-between;flex:0 0 auto}
+  .headright{display:flex;align-items:center;gap:6px}
+  .devbtn{border:1px solid var(--line);background:transparent;color:var(--sub);font-size:10px;
+    padding:4px 8px;border-radius:999px;cursor:pointer;font-family:inherit}
+  .devbtn:hover{color:var(--txt);border-color:#3a4155}
+  .devbtn.on{color:var(--warn);border-color:rgba(255,176,32,.5);background:rgba(255,176,32,.12)}
   .head h1{font-size:15px;margin:0;font-weight:600;display:flex;align-items:center;gap:7px}
   .head h1::before{content:"";width:4px;height:14px;border-radius:2px;background:var(--pink)}
   .badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;padding:5px 9px;border-radius:999px;
@@ -146,7 +151,10 @@
 <div class="phone">
   <div class="head">
     <h1>展会地图</h1>
-    <span id="status" class="badge"><span class="dot"></span><span id="statusText">初始化</span></span>
+    <div class="headright">
+      <span id="status" class="badge"><span class="dot"></span><span id="statusText">初始化</span></span>
+      <button class="devbtn" id="btnDev" title="模拟定位">调试</button>
+    </div>
   </div>
 
   <div class="seg">
@@ -1138,26 +1146,53 @@ $('segNECC').addEventListener('click', () => switchVenue(0));
 $('segDemo').addEventListener('click', () => switchVenue(1));
 
 /* ---------- 模拟定位按钮 ---------- */
-if (SIM){
-  $('simbar').classList.add('show');
-  $('btnSimVenue').addEventListener('click', () => {
-    const v = venue();
-    simFix(v.lat, v.lng, 10);
-    state.follow = true; state.center = applyCRS(v.lat, v.lng); state.z = 17;
-    $('btnFollow').classList.add('on');
-    scheduleRender();
-  });
-  $('btnSimFar').addEventListener('click', () => {
-    const v = venue();
-    simFix(v.lat + 0.03, v.lng + 0.03, 20);   // 约 4km 外，用来看锁定态
-    state.follow = false; $('btnFollow').classList.remove('on');
-    state.center = applyCRS(v.lat, v.lng); state.z = 14;
-    scheduleRender();
-  });
-  $('btnSimExit').addEventListener('click', () => {
-    location.href = location.pathname;
-  });
+function showSimBar(on){
+  $('simbar').classList.toggle('show', on);
+  $('btnDev').classList.toggle('on', on);
 }
+
+if (SIM) showSimBar(true);
+$('btnSimVenue').addEventListener('click', () => {
+  const v = venue();
+  simFix(v.lat, v.lng, 10);
+  state.follow = true; state.center = applyCRS(v.lat, v.lng); state.z = 17;
+  $('btnFollow').classList.add('on');
+  scheduleRender();
+});
+$('btnSimFar').addEventListener('click', () => {
+  const v = venue();
+  simFix(v.lat + 0.03, v.lng + 0.03, 20);   // 约 4km 外，用来看锁定态
+  state.follow = false; $('btnFollow').classList.remove('on');
+  state.center = applyCRS(v.lat, v.lng); state.z = 14;
+  scheduleRender();
+});
+$('btnSimExit').addEventListener('click', () => {
+  SIM = false;
+  showSimBar(false);
+  state.fix = null;
+  $('marker').style.display = 'none';
+  $('dist').textContent = '--';
+  $('dbg').textContent = '已退出模拟，恢复真实定位…';
+  startWatch();
+});
+
+/* 顶栏「调试」按钮：随时开关模拟，不依赖 URL 参数 */
+$('btnDev').addEventListener('click', () => {
+  if (SIM){
+    $('btnSimExit').click();
+  } else {
+    SIM = true;
+    showSimBar(true);
+    stopWatch();
+    simFix(venue().lat, venue().lng, 10);
+    state.center = applyCRS(venue().lat, venue().lng);
+    state.z = 17;
+    state.follow = true;
+    $('btnFollow').classList.add('on');
+    setStatus('ok', '模拟定位');
+    scheduleRender();
+  }
+});
 
 /* ---------- 朝向校准 ---------- */
 function renderCalibUI(){
