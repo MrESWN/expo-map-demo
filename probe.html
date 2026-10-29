@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>环境能力诊断</title>
+<style>
+  :root{--bg:#0e1016;--card:#171a23;--card2:#1e2230;--line:#2a2f40;--txt:#e8ebf2;--sub:#8b93a7;
+        --ok:#2fd08a;--warn:#ffb020;--err:#ff5c6c;--acc:#2f7bff;--pink:#fb7299}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;background:var(--bg);color:var(--txt);padding:16px 14px 40px;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:460px;margin:0 auto}
+  h1{font-size:17px;margin:0 0 4px}
+  .sub{color:var(--sub);font-size:12px;margin-bottom:16px;line-height:1.6}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+  .title{font-size:13px;font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+  .tag{font-size:10px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--sub)}
+  .tag.ok{color:var(--ok);border-color:rgba(47,208,138,.4);background:rgba(47,208,138,.1)}
+  .tag.bad{color:var(--err);border-color:rgba(255,92,108,.4);background:rgba(255,92,108,.1)}
+  .tag.wait{color:var(--warn);border-color:rgba(255,176,32,.4);background:rgba(255,176,32,.1)}
+  .kv{display:flex;justify-content:space-between;gap:12px;font-size:12px;padding:5px 0;
+    border-bottom:1px dashed rgba(255,255,255,.06)}
+  .kv:last-child{border-bottom:0}
+  .kv .k{color:var(--sub);flex:0 0 auto}
+  .kv .v{font-family:"SF Mono",Consolas,monospace;text-align:right;word-break:break-all}
+  button{width:100%;border:0;border-radius:11px;padding:12px;font-size:14px;font-weight:600;
+    background:var(--acc);color:#fff;cursor:pointer;font-family:inherit;margin-top:6px}
+  button.ghost{background:var(--card2);color:var(--txt);border:1px solid var(--line)}
+  .note{font-size:11px;color:var(--sub);line-height:1.7;margin-top:10px}
+  pre{background:var(--card2);border-radius:10px;padding:12px;font-size:10.5px;line-height:1.6;
+    white-space:pre-wrap;word-break:break-all;margin:10px 0 0;max-height:260px;overflow:auto;color:#a8b4d0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>环境能力诊断</h1>
+  <div class="sub">在 B站 App 内打开本页，用来确认「定位」和「方向」这两个能力是否可用。<br/>结果只在本机计算，不上传。</div>
+
+  <div class="card">
+    <div class="title">运行环境 <span class="tag" id="tEnv">检测中</span></div>
+    <div class="kv"><span class="k">UA</span><span class="v" id="ua">--</span></div>
+    <div class="kv"><span class="k">是否 B站客户端</span><span class="v" id="isBili">--</span></div>
+    <div class="kv"><span class="k">安全上下文</span><span class="v" id="secure">--</span></div>
+    <div class="kv"><span class="k">localStorage</span><span class="v" id="ls">--</span></div>
+  </div>
+
+  <div class="card">
+    <div class="title">定位能力 <span class="tag" id="tGeo">检测中</span></div>
+    <div class="kv"><span class="k">API 存在</span><span class="v" id="geoApi">--</span></div>
+    <div class="kv"><span class="k">授权结果</span><span class="v" id="geoState">--</span></div>
+    <div class="kv"><span class="k">坐标</span><span class="v" id="geoCrd">--</span></div>
+    <div class="kv"><span class="k">精度</span><span class="v" id="geoAcc">--</span></div>
+    <div class="kv"><span class="k">错误码</span><span class="v" id="geoErr">--</span></div>
+    <button id="btnGeo">重新请求定位</button>
+  </div>
+
+  <div class="card">
+    <div class="title">方向能力 <span class="tag" id="tOri">检测中</span></div>
+    <div class="kv"><span class="k">事件支持</span><span class="v" id="oriApi">--</span></div>
+    <div class="kv"><span class="k">需申请权限</span><span class="v" id="oriPerm">--</span></div>
+    <div class="kv"><span class="k">收到事件</span><span class="v" id="oriCount">0 次</span></div>
+    <div class="kv"><span class="k">最新样本</span><span class="v" id="oriVal">--</span></div>
+    <div class="kv"><span class="k">指南针角度</span><span class="v" id="oriHead">--</span></div>
+  </div>
+
+  <button id="btnCopy">复制诊断报告</button>
+  <button class="ghost" id="btnAgain">重新检测</button>
+  <pre id="report">等待检测…</pre>
+
+  <div class="note">
+    判读方法：<br/>
+    · 定位「授权结果 = 超时/被拒」→ B站 WebView 未放行定位，需客户端配合或改走 JSBridge<br/>
+    · 方向「收到事件 = 0 次」或「权限 = denied」→ iOS WKWebView 不开放该事件，必须客户端下发<br/>
+    · 两项都正常 → 现有实现在 B站内可直接使用
+  </div>
+</div>
+
+<script>
+(function(){
+'use strict';
+var $ = function(id){ return document.getElementById(id); };
+var log = {};
+
+function setTag(id, text, cls){
+  var el = $(id);
+  el.textContent = text;
+  el.className = 'tag ' + (cls || '');
+}
+
+/* ---------------- 环境 ---------------- */
+var ua = navigator.userAgent;
+$('ua').textContent = ua;
+
+var bili = /[Bb]ili[A-Za-z]*|BiliApp|bilibili/i.test(ua);
+log.isBili = bili;
+$('isBili').textContent = bili ? '是' : '否（可能是系统浏览器）';
+setTag('tEnv', bili ? 'B站内' : '非B站', bili ? 'ok' : 'wait');
+
+log.secure = window.isSecureContext;
+$('secure').textContent = window.isSecureContext ? '是（HTTPS）' : '否（http，定位会被拒）';
+
+try {
+  localStorage.setItem('__probe__', '1');
+  localStorage.removeItem('__probe__');
+  log.ls = true;
+  $('ls').textContent = '可用';
+} catch (e) {
+  log.ls = false;
+  $('ls').textContent = '不可用';
+}
+
+/* ---------------- 定位 ---------------- */
+$('geoApi').textContent = navigator.geolocation ? '有' : '无';
+var geoTried = false;
+
+function geoResult(kind, text, cls){
+  $('geoState').textContent = text;
+  setTag('tGeo', kind, cls);
+  log.geoState = text;
+}
+
+function askGeo(){
+  if (!navigator.geolocation){ geoResult('不支持', '浏览器无此 API', 'bad'); return; }
+  if (geoTried) { $('geoState').textContent = '再次请求中…'; }
+  geoTried = true;
+  var done = false;
+
+  var timer = setTimeout(function(){
+    if (done) return;
+    done = true;
+    geoResult('超时', '20 秒无响应（WebView 常见：无弹窗、静默挂起）', 'bad');
+    $('geoErr').textContent = 'timeout';
+  }, 20000);
+
+  navigator.geolocation.getCurrentPosition(function(pos){
+    if (done) return; done = true; clearTimeout(timer);
+    var c = pos.coords;
+    $('geoCrd').textContent = c.latitude.toFixed(6) + ', ' + c.longitude.toFixed(6);
+    $('geoAcc').textContent = '±' + Math.round(c.accuracy) + ' m';
+    $('geoErr').textContent = '--';
+    geoResult('可用', '成功', 'ok');
+  }, function(err){
+    if (done) return; done = true; clearTimeout(timer);
+    var map = {1:'被拒绝（权限）', 2:'位置不可用', 3:'超时'};
+    $('geoErr').textContent = err.code + ' / ' + (err.message || '');
+    geoResult('失败', map[err.code] || '未知错误', 'bad');
+  }, { enableHighAccuracy: true, timeout: 18000, maximumAge: 0 });
+}
+$('btnGeo').addEventListener('click', askGeo);
+
+/* ---------------- 方向 ---------------- */
+var oriCount = 0, oriFirst = null, permState = '不需要';
+
+if (typeof DeviceOrientationEvent === 'undefined'){
+  $('oriApi').textContent = '不支持';
+  setTag('tOri', '不支持', 'bad');
+  log.ori = 'unsupported';
+} else {
+  $('oriApi').textContent = '支持';
+  var needPerm = typeof DeviceOrientationEvent.requestPermission === 'function';
+  $('oriPerm').textContent = needPerm ? '需要（iOS 13+）' : '不需要';
+
+  function onOri(e){
+    oriCount++;
+    if (!oriFirst) oriFirst = e;
+    $('oriCount').textContent = oriCount + ' 次';
+    var a = e.alpha, b = e.beta, g = e.gamma;
+    $('oriVal').textContent =
+      'α' + (a == null ? '-' : Math.round(a)) +
+      ' β' + (b == null ? '-' : Math.round(b)) +
+      ' γ' + (g == null ? '-' : Math.round(g)) +
+      (e.absolute ? ' abs' : ' rel');
+    $('oriHead').textContent = (e.webkitCompassHeading != null)
+      ? Math.round(e.webkitCompassHeading) + '°'
+      : '—';
+  }
+
+  function startOri(){
+    window.addEventListener('deviceorientationabsolute', onOri, true);
+    window.addEventListener('deviceorientation', onOri, true);
+    setTag('tOri', '监听中', 'wait');
+    setTimeout(function(){
+      if (oriCount === 0){
+        setTag('tOri', '无数据', 'bad');
+        log.ori = 'no-events';
+      } else {
+        setTag('tOri', '可用', 'ok');
+        log.ori = 'ok';
+      }
+    }, 8000);
+  }
+
+  // 检查权限状态（iOS 15+ 有 queryPermission）
+  if (DeviceOrientationEvent.queryPermission){
+    DeviceOrientationEvent.queryPermission().then(function(s){
+      permState = s;
+      $('oriPerm').textContent = '需要 · 当前 ' + s;
+      if (s === 'granted') startOri();
+      else if (s === 'denied'){ setTag('tOri', '被拒绝', 'bad'); log.ori = 'denied'; }
+      else startOri();
+    }).catch(function(){ startOri(); });
+  } else {
+    startOri();
+  }
+}
+
+/* ---------------- 报告 ---------------- */
+function buildReport(){
+  return [
+    '=== 环境 ===',
+    'UA: ' + ua,
+    'B站客户端: ' + (log.isBili ? '是' : '否'),
+    '安全上下文: ' + (log.secure ? '是' : '否'),
+    'localStorage: ' + (log.ls ? '可用' : '不可用'),
+    '',
+    '=== 定位 ===',
+    'API: ' + (navigator.geolocation ? '有' : '无'),
+    '结果: ' + ($('geoState').textContent || '-'),
+    '坐标: ' + ($('geoCrd').textContent || '-'),
+    '精度: ' + ($('geoAcc').textContent || '-'),
+    '错误: ' + ($('geoErr').textContent || '-'),
+    '',
+    '=== 方向 ===',
+    '事件支持: ' + ($('oriApi').textContent || '-'),
+    '权限: ' + ($('oriPerm').textContent || '-'),
+    '事件次数: ' + oriCount,
+    '样本: ' + ($('oriVal').textContent || '-'),
+    '指南针: ' + ($('oriHead').textContent || '-'),
+    '',
+    '时间: ' + new Date().toLocaleString()
+  ].join('\n');
+}
+
+$('btnCopy').addEventListener('click', function(){
+  var txt = buildReport();
+  $('report').textContent = txt;
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(function(){
+      this.textContent = '已复制到剪贴板';
+      var b = $('btnCopy');
+      b.textContent = '已复制 ✓';
+      setTimeout(function(){ b.textContent = '复制诊断报告'; }, 1500);
+    }.bind(this)).catch(function(){ /* 降级 */ });
+  }
+});
+
+$('btnAgain').addEventListener('click', function(){
+  askGeo();
+  oriCount = 0;
+  $('oriCount').textContent = '0 次';
+  setTag('tOri', '监听中', 'wait');
+});
+
+askGeo();
+setTimeout(function(){ $('report').textContent = buildReport(); }, 9000);
+})();
+</script>
+</body>
+</html>
