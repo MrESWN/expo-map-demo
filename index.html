@@ -495,6 +495,8 @@ function render(){
 const CARD = ['北','东北','东','东南','南','西南','西','西北'];
 const cardinal = d => CARD[Math.round((((d % 360) + 360) % 360) / 45) % 8];
 
+let dispDeg = null;   // 连续角度（不取模），专供 CSS 旋转
+
 function setHeading(rawDeg){
   const mk = $('marker');
   const dir = mk.querySelector('.dir');
@@ -513,7 +515,18 @@ function setHeading(rawDeg){
 
   state.heading = d;
   $('heading').textContent = (compassApprox ? '≈' : '') + Math.round(d) + '° ' + cardinal(d);
-  if (dir) dir.style.transform = `rotate(${d}deg)`;
+
+  if (dir){
+    /* 连续角度：避免 359°→1° 时 CSS 反向插值转一整圈 */
+    if (dispDeg === null){
+      dispDeg = d;
+    } else {
+      const cur = ((dispDeg % 360) + 360) % 360;
+      const delta = ((d - cur + 540) % 360) - 180;   // 归一到 (-180, 180]
+      dispDeg += delta;
+    }
+    dir.style.transform = `rotate(${dispDeg}deg)`;
+  }
   mk.classList.add('has-heading');
 }
 
@@ -575,6 +588,18 @@ function headingFromOrientation(alpha, beta, gamma){
   return h;
 }
 
+/* 异常跳变保护：单帧内超过 120° 视为传感器毛刺，先不予采纳 */
+let guardDeg = null, guardTime = 0;
+function headingGuard(deg){
+  const now = performance.now();
+  if (guardDeg !== null){
+    const diff = Math.abs(((deg - guardDeg + 540) % 360) - 180);
+    if (diff > 120 && now - guardTime < 350) return guardDeg;
+  }
+  guardDeg = deg; guardTime = now;
+  return deg;
+}
+
 /* 圆周平滑：避免箭头抖动、跳变 */
 let smX = null, smY = null;
 function smoothHeading(deg){
@@ -628,7 +653,7 @@ function onOrientation(e, fromAbsoluteEvent){
   state.ori = { a: Math.round(e.alpha || 0), b: Math.round(e.beta || 0), g: Math.round(e.gamma || 0) };
 
   const screenDeg = (h - screenAngle() + 360) % 360;
-  setHeading(smoothHeading(screenDeg));
+  setHeading(smoothHeading(headingGuard(screenDeg)));
 }
 
 let compassLive = false, compassStarted = false;
