@@ -24,10 +24,16 @@ let lastTopZ = 0;
 function headingFromOrientation(alpha, beta, gamma){
   const top = rotateToWorld(alpha, beta, gamma, [0, 1, 0]);
   const back = rotateToWorld(alpha, beta, gamma, [0, 0, -1]);
-  const topH = Math.hypot(top[0], top[1]);
-  const backH = Math.hypot(back[0], back[1]);
-  let h = azimuthOf(backH > topH ? back : top);
   lastTopZ = top[2];
+  const topAz = azimuthOf(top), backAz = azimuthOf(back);
+  const wBack = Math.max(0, Math.min(1, 1 - Math.abs(back[2])));
+  const wTop = 1 - wBack;
+  const rad = PI / 180;
+  const x = wTop * Math.sin(topAz * rad) + wBack * Math.sin(backAz * rad);
+  const y = wTop * Math.cos(topAz * rad) + wBack * Math.cos(backAz * rad);
+  let h;
+  if (Math.hypot(x, y) < 0.25) h = Math.abs(top[2]) < Math.abs(back[2]) ? backAz : topAz;
+  else h = (Math.atan2(x, y) * 180 / PI + 360) % 360;
   if (top[2] < -0.7) h = (h + 180) % 360;
   return h;
 }
@@ -66,3 +72,20 @@ for (const [a, b, g, label, expect] of cases){
   );
 }
 console.log('\n失败数: ' + bad);
+
+/* ---------- 连续性检查：倾角扫过临界区不应出现跳变 ---------- */
+function scan(gamma){
+  let maxStep = 0, at = null, prev = null;
+  for (let b = 0; b <= 90; b += 0.5){
+    const h = headingFromOrientation(0, b, gamma);
+    if (prev !== null){
+      const d = Math.abs(((h - prev + 540) % 360) - 180);
+      if (d > maxStep){ maxStep = d; at = b; }
+    }
+    prev = h;
+  }
+  console.log(`倾角 0→90 (γ=${gamma}) 单步最大跳变 ${maxStep.toFixed(2)}°  @β=${at}`);
+  return maxStep;
+}
+console.log('');
+scan(0); scan(-20); scan(20); scan(-40);

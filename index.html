@@ -574,15 +574,32 @@ function headingFromOrientation(alpha, beta, gamma){
   const top = rotateToWorld(alpha, beta, gamma, [0, 1, 0]);    // 设备顶部
   const back = rotateToWorld(alpha, beta, gamma, [0, 0, -1]);  // 背面法线（摄像头朝向）
 
-  const topH = Math.hypot(top[0], top[1]);    // 顶部轴的水平分量
-  const backH = Math.hypot(back[0], back[1]); // 背面轴的水平分量
+  lastTopZ = top[2];
 
-  let h = azimuthOf(backH > topH ? back : top);
+  const topAz = azimuthOf(top);
+  const backAz = azimuthOf(back);
+
+  /* 两轴按"法线偏离垂直的程度"加权融合，取代硬切换：
+     - 手机平放：背面朝下（|Z|≈1），权重 0 → 用顶部轴
+     - 手机立起：背面水平（|Z|≈0），权重 1 → 用背面轴
+     融合是连续函数，倾角在临界点附近抖动时不会再造成几十度跳变 */
+  const wBack = Math.max(0, Math.min(1, 1 - Math.abs(back[2])));
+  const wTop = 1 - wBack;
+
+  const rad = PI / 180;
+  const x = wTop * Math.sin(topAz * rad) + wBack * Math.sin(backAz * rad);
+  const y = wTop * Math.cos(topAz * rad) + wBack * Math.cos(backAz * rad);
+
+  let h;
+  if (Math.hypot(x, y) < 0.25){
+    h = Math.abs(top[2]) < Math.abs(back[2]) ? backAz : topAz;   // 两轴几乎相反时兜底
+  } else {
+    h = (Math.atan2(x, y) * 180 / PI + 360) % 360;
+  }
 
   /* 自动纠正 180°：
      正常握持时手机顶部朝上（世界 Z > 0）。若算出顶部朝下（Z < -0.7），
      说明该设备的倾角符号约定与标准相反，背法线会指向身后，整体翻转 180°。 */
-  lastTopZ = top[2];
   if (top[2] < -0.7) h = (h + 180) % 360;
 
   return h;
