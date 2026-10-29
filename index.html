@@ -247,7 +247,7 @@ const CONFIG = {
        中心点按卫星图校准：主体约 900m × 950m，对角线约 1.3km
        半径 1500m 覆盖整个地块 + 步行 10 分钟范围 */
     { id:'necc', name:'国家会展中心', short:'国家会展中心',
-      lat: 31.1931, lng: 121.2966, radius: 1500, hyst: 150, span: 1200, rot: -30 },
+      lat: 31.1917, lng: 121.2975, radius: 1500, hyst: 150, span: 1200, rot: -30 },
 
     /* 凯德国正中心（演示场地，围栏尺寸与正式场地对齐，便于验证同一套判定） */
     { id:'demo', name:'上海凯德国正中心', short:'国正中心（演示）',
@@ -1156,7 +1156,7 @@ if (SIM) showSimBar(true);
 $('btnSimVenue').addEventListener('click', () => {
   const v = venue();
   simFix(v.lat, v.lng, 10);
-  state.follow = true; state.center = applyCRS(v.lat, v.lng); state.z = 17;
+  state.follow = true; state.center = applyCRS(v.lng, v.lat); state.z = 17;
   $('btnFollow').classList.add('on');
   scheduleRender();
 });
@@ -1164,7 +1164,7 @@ $('btnSimFar').addEventListener('click', () => {
   const v = venue();
   simFix(v.lat + 0.03, v.lng + 0.03, 20);   // 约 4km 外，用来看锁定态
   state.follow = false; $('btnFollow').classList.remove('on');
-  state.center = applyCRS(v.lat, v.lng); state.z = 14;
+  state.center = applyCRS(v.lng, v.lat); state.z = 14;
   scheduleRender();
 });
 $('btnSimExit').addEventListener('click', () => {
@@ -1186,7 +1186,7 @@ $('btnDev').addEventListener('click', () => {
     showSimBar(true);
     stopWatch();
     simFix(venue().lat, venue().lng, 10);
-    state.center = applyCRS(venue().lat, venue().lng);
+    state.center = applyCRS(venue().lng, venue().lat);
     state.z = 17;
     state.follow = true;
     $('btnFollow').classList.add('on');
