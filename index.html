@@ -96,6 +96,18 @@
   .attr{position:absolute;right:6px;bottom:5px;font-size:9px;color:#5d6478;background:rgba(255,255,255,.6);
     padding:2px 5px;border-radius:4px;z-index:5}
 
+  /* iOS 方向权限提示条 */
+  .permbar{position:absolute;left:9px;right:9px;bottom:9px;z-index:32;display:none;align-items:center;gap:8px;
+    background:rgba(23,26,35,.96);border:1px solid rgba(251,114,153,.5);border-radius:12px;
+    padding:9px 11px;box-shadow:0 6px 20px rgba(0,0,0,.5);backdrop-filter:blur(8px)}
+  .permbar.show{display:flex}
+  .permbar span{flex:1;font-size:11px;line-height:1.45;color:#cfd6e6}
+  .permbar button{border:0;border-radius:9px;padding:8px 14px;font-size:12px;font-weight:600;
+    background:linear-gradient(135deg,#fb7299,#ff9db5);color:#fff;cursor:pointer;font-family:inherit;white-space:nowrap}
+  .permbar button:active{transform:scale(.97)}
+  .permbar.hint{border-color:var(--line)}
+  .permbar.hint button{background:var(--card2);color:var(--txt);border:1px solid var(--line)}
+
   .panel{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:10px 12px;flex:0 0 auto}
   .row3{display:flex;gap:7px}
   .row3 > div{flex:1;background:var(--card2);border-radius:10px;padding:6px 9px;min-width:0}
@@ -162,6 +174,11 @@
         <div class="lockbar"><i id="lockBar"></i></div>
         <button class="simbtn" id="btnSim">定位不准？点此模拟进入（调试）</button>
       </div>
+    </div>
+
+    <div class="permbar" id="permbar">
+      <span id="permText">需要允许「运动与方向」才能显示朝向箭头</span>
+      <button id="btnPerm">开启</button>
     </div>
 
     <div class="attr" id="attr">© 高德地图</div>
@@ -615,26 +632,62 @@ function onOrientation(e, fromAbsoluteEvent){
 }
 
 let compassLive = false, compassStarted = false;
+
+/* ---------- 方向权限（iOS 必须用户点击才能申请） ---------- */
+function showPermBar(text, btnLabel, hint){
+  $('permText').textContent = text;
+  const b = $('btnPerm');
+  b.textContent = btnLabel || '';
+  b.style.display = btnLabel ? '' : 'none';
+  $('permbar').classList.toggle('hint', !!hint);
+  $('permbar').classList.add('show');
+}
+function hidePermBar(){ $('permbar').classList.remove('show'); }
+
+function attachOrientation(){
+  window.addEventListener('deviceorientationabsolute', e => onOrientation(e, true), true);
+  window.addEventListener('deviceorientation', e => onOrientation(e, false), true);
+}
+
+const iosNeedsPermission = () => typeof DeviceOrientationEvent !== 'undefined'
+  && typeof DeviceOrientationEvent.requestPermission === 'function';
+
 function startCompass(){
   if (compassStarted) return;
-  const needPerm = typeof DeviceOrientationEvent !== 'undefined' &&
-                   typeof DeviceOrientationEvent.requestPermission === 'function';
-  if (!needPerm){
-    compassStarted = true;
-    window.addEventListener('deviceorientationabsolute', e => onOrientation(e, true), true);
-    window.addEventListener('deviceorientation', e => onOrientation(e, false), true);
+
+  if (typeof DeviceOrientationEvent === 'undefined'){
+    showPermBar('当前浏览器不支持方向感应，箭头无法显示', '', true);
     return;
   }
-  // iOS 13+：权限必须在用户手势里申请，借首次触摸触发一次
-  document.addEventListener('pointerdown', function once(){
-    DeviceOrientationEvent.requestPermission().then(r => {
-      if (r === 'granted'){
-        compassStarted = true;
-        window.addEventListener('deviceorientation', e => onOrientation(e, false), true);
-      }
-    }).catch(() => {});
-  }, { once: true });
+  if (!iosNeedsPermission()){
+    compassStarted = true;   // 安卓 / 桌面：直接接事件
+    attachOrientation();
+    return;
+  }
+  // iOS：权限只能在用户手势里申请，先挂一个常驻按钮
+  showPermBar('需要允许「运动与方向」才能显示朝向箭头', '开启');
 }
+
+async function askCompass(){
+  try {
+    const r = await DeviceOrientationEvent.requestPermission();
+    if (r === 'granted'){
+      compassStarted = true;
+      attachOrientation();
+      hidePermBar();
+      toast('方向权限已开启');
+      setTimeout(() => {
+        if (!compassLive) showPermBar('已授权但没收到方向数据，请把手机竖起来再试', '重试', true);
+      }, 2500);
+    } else {
+      showPermBar('已拒绝：设置 → Safari → 高级 → 网站数据，删除本站后重新打开', '重试', true);
+    }
+  } catch (e) {
+    showPermBar('申请失败：' + (e && e.message ? e.message : '未知错误'), '重试', true);
+  }
+}
+
+$('btnPerm').addEventListener('click', askCompass);
 
 /* ==================================================================
    状态栏
@@ -974,8 +1027,13 @@ function boot(){
   setTimeout(() => {
     if (!state.fix) $('dbg').textContent = '仍未取得定位：请确认已允许位置权限、且设备定位已开启';
     if (!compassLive && state.heading === null){
-      $('heading').textContent = '无方向传感器';
-      toast('没检测到方向传感器：需要手机打开，iOS 要允许“运动与方向”');
+      const waiting = $('permbar').classList.contains('show');
+      if (waiting){
+        $('heading').textContent = '待授权';
+      } else {
+        $('heading').textContent = '无方向传感器';
+        toast('没检测到方向传感器：需要手机打开，iOS 要允许「运动与方向」');
+      }
     }
   }, 5000);
 }
