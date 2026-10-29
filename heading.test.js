@@ -20,12 +20,16 @@ function azimuthOf(vec){
   if (d < 0) d += 360;
   return d;
 }
+let lastTopZ = 0;
 function headingFromOrientation(alpha, beta, gamma){
   const top = rotateToWorld(alpha, beta, gamma, [0, 1, 0]);
   const back = rotateToWorld(alpha, beta, gamma, [0, 0, -1]);
   const topH = Math.hypot(top[0], top[1]);
   const backH = Math.hypot(back[0], back[1]);
-  return azimuthOf(backH > topH ? back : top);
+  let h = azimuthOf(backH > topH ? back : top);
+  lastTopZ = top[2];
+  if (top[2] < -0.7) h = (h + 180) % 360;
+  return h;
 }
 
 const cases = [
@@ -45,6 +49,8 @@ const cases = [
   [0,   88, 0,   '近垂直，朝北', 0],
   [0,   2,  0,   '近水平，朝北', 0],
   [0,   90, 20,  '立起+绕竖轴偏20°，朝北', 340],
+  [0,  -90, 0,   '倾角符号反向（iQOO 场景）', 0],
+  [270,-90, 0,   '倾角反向且朝东', 90],
 ];
 
 let bad = 0;

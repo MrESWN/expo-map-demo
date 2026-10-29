@@ -184,6 +184,7 @@
       <button data-c="reset">归零</button>
       <button data-c="15">+15°</button>
       <button data-c="90">+90°</button>
+      <button data-c="180">翻转180°</button>
       <button data-c="mirror">左右翻转</button>
       <span class="calibv" id="calibv">偏移 0°</span>
     </div>
@@ -537,6 +538,8 @@ function azimuthOf(vec){
   return d;
 }
 
+let lastTopZ = 0;
+
 function headingFromOrientation(alpha, beta, gamma){
   const top = rotateToWorld(alpha, beta, gamma, [0, 1, 0]);    // 设备顶部
   const back = rotateToWorld(alpha, beta, gamma, [0, 0, -1]);  // 背面法线（摄像头朝向）
@@ -544,7 +547,15 @@ function headingFromOrientation(alpha, beta, gamma){
   const topH = Math.hypot(top[0], top[1]);    // 顶部轴的水平分量
   const backH = Math.hypot(back[0], back[1]); // 背面轴的水平分量
 
-  return azimuthOf(backH > topH ? back : top);
+  let h = azimuthOf(backH > topH ? back : top);
+
+  /* 自动纠正 180°：
+     正常握持时手机顶部朝上（世界 Z > 0）。若算出顶部朝下（Z < -0.7），
+     说明该设备的倾角符号约定与标准相反，背法线会指向身后，整体翻转 180°。 */
+  lastTopZ = top[2];
+  if (top[2] < -0.7) h = (h + 180) % 360;
+
+  return h;
 }
 
 /* 圆周平滑：避免箭头抖动、跳变 */
@@ -661,7 +672,8 @@ function onFix(pos){
   const o = state.ori;
   $('dbg').textContent = `${c.latitude.toFixed(5)}, ${c.longitude.toFixed(5)} · ±${Math.round(c.accuracy||0)}m`
     + (o ? ` · α${o.a} β${o.b} γ${o.g}` : '')
-    + (state.rawHeading != null ? ` · H${Math.round(state.rawHeading)}` : '');
+    + (state.rawHeading != null ? ` · H${Math.round(state.rawHeading)}` : '')
+    + ` · z${lastTopZ.toFixed(1)}`;
 
   // 没有罗盘时用 GPS 行进方向兜底
   if (!compassLive && c.heading !== null && c.heading !== undefined && (c.speed || 0) > 0.6){
