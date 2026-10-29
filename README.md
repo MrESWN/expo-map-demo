@@ -42,13 +42,14 @@ git push -u origin main
 
 ```js
 venues: [
-  { id:'necc', name:'国家会展中心', lat: 31.1937, lng: 121.3058, radius: 1200 },
-  { id:'demo', name:'上海凯德国正中心', lat: 31.3109033, lng: 121.5015148, radius: 800 }
+  { id:'necc', name:'国家会展中心', lat: 31.1914, lng: 121.3039,
+    radius: 1500, hyst: 150, span: 1200 },   // 主体约 900×950m，围栏 1500m + 150m 迟滞
+  { id:'demo', name:'上海凯德国正中心', lat: 31.3109033, lng: 121.5015148,
+    radius: 1500, hyst: 150, span: 800 }     // 演示场地，围栏尺寸与正式场地对齐
 ],
-activeVenue: 'demo',          // 默认场地；正式上线改成 'necc'
+activeVenue: 'necc',          // 默认场地；本地调试改成 'demo'
 window:     { start:'2026-10-29T00:00:00+08:00', end:'2026-11-01T00:00:00+08:00' },
 overlayUrl: '',               // 展会平面图地址，留空则用内置示例图
-overlaySpanMeters: 520,       // 底图覆盖边长（米）
 lockShowsSelf: true           // 未解锁时是否显示灰色自身点位
 ```
 

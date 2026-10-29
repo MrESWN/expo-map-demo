@@ -222,16 +222,21 @@ const $ = id => document.getElementById(id);
    ================================================================== */
 const CONFIG = {
   venues: [
+    /* 国家会展中心（正式场地）
+       中心点按卫星图校准：主体约 900m × 950m，对角线约 1.3km
+       半径 1500m 覆盖整个地块 + 步行 10 分钟范围 */
     { id:'necc', name:'国家会展中心', short:'国家会展中心',
-      lat: 31.1937, lng: 121.3058, radius: 1200 },
+      lat: 31.1914, lng: 121.3039, radius: 1500, hyst: 150, span: 1200 },
+
+    /* 凯德国正中心（演示场地，围栏尺寸与正式场地对齐，便于验证同一套判定） */
     { id:'demo', name:'上海凯德国正中心', short:'国正中心（演示）',
-      lat: 31.3109033, lng: 121.5015148, radius: 800 }
+      lat: 31.3109033, lng: 121.5015148, radius: 1500, hyst: 150, span: 800 }
   ],
-  activeVenue: 'demo',          // 你现在在国正中心，先默认演示场地；正式上线改成 'necc'
+  activeVenue: 'necc',          // 默认场地；本地调试可改成 'demo'
 
   window: { start:'2026-10-29T00:00:00+08:00', end:'2026-11-01T00:00:00+08:00' },
 
-  overlaySpanMeters: 520,       // 展会底图覆盖的边长（米）
+  overlaySpanMeters: 520,       // 兜底值；场地未指定 span 时使用
   overlayUrl: '',               // 填你的展会平面图地址；留空用内置示例图
   lockShowsSelf: true,          // 未解锁时显示灰色自身点位（调试用）
   routeEnabled: true,           // 展示路径（对接已有规划能力的占位）
@@ -476,7 +481,7 @@ function render(){
   // 展会底图
   const ov = $('overlayImg');
   if (state.overlayOn && state.inWindow){
-    const b = venueBBox(CONFIG.overlaySpanMeters);
+    const b = venueBBox(v.span || CONFIG.overlaySpanMeters);
     const p1 = applyCRS(b.west, b.north), p2 = applyCRS(b.east, b.south);
     const ax = lng2x(p1.lng, z) - left, ay = lat2y(p1.lat, z) - top;
     const bx = lng2x(p2.lng, z) - left, by = lat2y(p2.lat, z) - top;
@@ -854,7 +859,11 @@ function updateLock(d, v){
   $('lockDist').textContent = d >= 1000 ? (d/1000).toFixed(2) + ' km' : Math.round(d) + ' m';
   $('lockBar').style.width = Math.max(4, Math.min(100, 100 - Math.min(100, reach/20))) + '%';
 
-  const should = state.forced || d <= v.radius;
+/* 迟滞判定：进入半径内解锁，离开 半径+迟滞 才重新锁定，避免边界抖动 */
+  const hyst = v.hyst || 0;
+  const enter = d <= v.radius;
+  const leave = d > v.radius + hyst;
+  const should = state.forced || (state.unlocked ? !leave : enter);
   if (should === state.unlocked){
     if (!should) $('lockHint').textContent = `进入 ${v.name} 周边 ${v.radius} m 内自动解锁`;
     return;
