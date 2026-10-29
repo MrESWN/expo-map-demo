@@ -129,6 +129,13 @@
   .calib button.on{color:var(--pink);border-color:rgba(251,114,153,.55);background:rgba(251,114,153,.12)}
   .calibv{font-size:10px;color:var(--sub);margin-left:auto;font-family:"SF Mono",Consolas,monospace}
   .err{color:var(--err);font-size:11px;line-height:1.5;margin-top:6px;display:none}
+  .simbar{display:none;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap}
+  .simbar.show{display:flex}
+  .simtag{font-size:10px;color:var(--warn);border:1px solid rgba(255,176,32,.45);
+    background:rgba(255,176,32,.12);padding:3px 8px;border-radius:999px}
+  .simbar button{border:1px solid var(--line);background:var(--card2);color:var(--sub);
+    font-size:10.5px;padding:5px 9px;border-radius:7px;cursor:pointer;font-family:inherit}
+  .simbar button:hover{color:var(--txt);border-color:#3a4155}
   .toast{position:fixed;left:50%;top:46%;transform:translate(-50%,-50%) scale(.92);background:rgba(47,208,138,.96);
     color:#06231a;font-size:13px;font-weight:600;padding:10px 18px;border-radius:12px;opacity:0;
     pointer-events:none;transition:.25s;z-index:99;max-width:80%;text-align:center;line-height:1.5}
@@ -206,6 +213,12 @@
       <span class="calibv" id="calibv">偏移 0°</span>
     </div>
     <button class="navbtn" id="btnNav">开始导航</button>
+    <div class="simbar" id="simbar">
+      <span class="simtag">模拟定位</span>
+      <button id="btnSimVenue">传送到场馆</button>
+      <button id="btnSimFar">传送到远处</button>
+      <button id="btnSimExit">退出</button>
+    </div>
     <div class="dbg" id="dbg">正在获取定位…</div>
     <div class="err" id="err"></div>
   </div>
@@ -274,6 +287,31 @@ function readNativeFix(){
     }
   } catch (e) { /* 容器未注入或调用失败 */ }
   return null;
+}
+
+/* ==================================================================
+   模拟定位（?sim=1）
+   用于不在现场时验证场馆视角：点地图即把「我的位置」设到该点
+   ================================================================== */
+let SIM = /[?&]sim=1/.test(location.search);
+
+function screenToLatLng(px, py){
+  const W = $('mapwrap').clientWidth, H = $('mapwrap').clientHeight, z = state.z;
+  const lng = x2lng(lng2x(state.center.lng, z) - W / 2 + px, z);
+  const lat = y2lat(lat2y(state.center.lat, z) - H / 2 + py, z);
+  return undoCRS(lng, lat);          // 转回 WGS84
+}
+
+function simFix(lat, lng, acc){
+  state.fix = { lng, lat, acc: acc || 15, speed: null, heading: null };
+  const v = venue();
+  const d = distanceMeters(lat, lng, v.lat, v.lng);
+  $('dist').textContent = d >= 1000 ? (d / 1000).toFixed(2) + ' km' : Math.round(d) + ' m';
+  $('acc').textContent = '±' + Math.round(acc || 15) + 'm';
+  $('dbg').textContent = `模拟定位 ${lat.toFixed(5)}, ${lng.toFixed(5)} · 距场馆 ${Math.round(d)} m`;
+  updateLock(d, v);
+  if (state.unlocked) state.center = applyCRS(lng, lat);
+  scheduleRender();
 }
 
 /* ==================================================================
@@ -915,6 +953,13 @@ let nativeTimer = null;
 function startWatch(){
   if (watchId !== null || nativeTimer !== null) return;
 
+  // 0) 模拟模式：不请求真实定位，默认站在场馆中心
+  if (SIM){
+    if (!state.fix) simFix(venue().lat, venue().lng, 10);
+    setStatus(state.unlocked ? 'ok' : 'lock', '模拟定位');
+    return;
+  }
+
   // 1) 优先用宿主 JSBridge 注入的位置
   const nf = readNativeFix();
   if (nf){
@@ -1000,25 +1045,34 @@ function switchVenue(idx){
    交互
    ================================================================== */
 const wrap = $('mapwrap');
-let dragging = false, lastX = 0, lastY = 0;
+let dragging = false, lastX = 0, lastY = 0, tapMoved = false;
 
 wrap.addEventListener('pointerdown', e => {
   if (e.target.closest('.fab') || e.target.closest('.zoombox') ||
       e.target.closest('.maptoggle') || e.target.closest('.compass')) return;
-  dragging = true; lastX = e.clientX; lastY = e.clientY;
+  dragging = true; tapMoved = false; lastX = e.clientX; lastY = e.clientY;
   wrap.setPointerCapture(e.pointerId);
 });
 wrap.addEventListener('pointermove', e => {
   if (!dragging) return;
   const dx = e.clientX - lastX, dy = e.clientY - lastY;
   lastX = e.clientX; lastY = e.clientY;
+  if (Math.abs(dx) + Math.abs(dy) > 2){ tapMoved = true; state.follow = false; $('btnFollow').classList.remove('on'); }
   const z = state.z;
   state.center = { lng: x2lng(lng2x(state.center.lng, z) - dx, z),
                    lat: y2lat(lat2y(state.center.lat, z) - dy, z) };
-  if (Math.abs(dx) + Math.abs(dy) > 2){ state.follow = false; $('btnFollow').classList.remove('on'); }
   scheduleRender();
 });
-wrap.addEventListener('pointerup', e => { dragging = false; try{ wrap.releasePointerCapture(e.pointerId); }catch(_){} });
+wrap.addEventListener('pointerup', e => {
+  dragging = false;
+  try{ wrap.releasePointerCapture(e.pointerId); }catch(_){}
+  // 模拟模式下：点地图 = 把「我的位置」设到该点
+  if (SIM && !tapMoved){
+    const rect = wrap.getBoundingClientRect();
+    const p = screenToLatLng(e.clientX - rect.left, e.clientY - rect.top);
+    simFix(p.lat, p.lng);
+  }
+});
 wrap.addEventListener('pointercancel', () => dragging = false);
 wrap.addEventListener('wheel', e => {
   e.preventDefault();
@@ -1082,6 +1136,28 @@ $('btnNav').addEventListener('click', () => {
 
 $('segNECC').addEventListener('click', () => switchVenue(0));
 $('segDemo').addEventListener('click', () => switchVenue(1));
+
+/* ---------- 模拟定位按钮 ---------- */
+if (SIM){
+  $('simbar').classList.add('show');
+  $('btnSimVenue').addEventListener('click', () => {
+    const v = venue();
+    simFix(v.lat, v.lng, 10);
+    state.follow = true; state.center = applyCRS(v.lat, v.lng); state.z = 17;
+    $('btnFollow').classList.add('on');
+    scheduleRender();
+  });
+  $('btnSimFar').addEventListener('click', () => {
+    const v = venue();
+    simFix(v.lat + 0.03, v.lng + 0.03, 20);   // 约 4km 外，用来看锁定态
+    state.follow = false; $('btnFollow').classList.remove('on');
+    state.center = applyCRS(v.lat, v.lng); state.z = 14;
+    scheduleRender();
+  });
+  $('btnSimExit').addEventListener('click', () => {
+    location.href = location.pathname;
+  });
+}
 
 /* ---------- 朝向校准 ---------- */
 function renderCalibUI(){
