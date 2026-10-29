@@ -521,18 +521,27 @@ function screenAngle(){
   return 0;
 }
 
-function onOrientation(e){
+let sawAbsolute = false;
+
+function onOrientation(e, fromAbsoluteEvent){
+  const hasWebkit = typeof e.webkitCompassHeading === 'number'
+    && !isNaN(e.webkitCompassHeading) && e.webkitCompassHeading >= 0;
+  const isAbsolute = hasWebkit || fromAbsoluteEvent || !!e.absolute;
+
+  if (fromAbsoluteEvent) sawAbsolute = true;
+  // 已经有绝对方向源时，丢弃相对事件（否则两者交替会带来固定角度偏差）
+  if (!isAbsolute && sawAbsolute) return;
+
   let h = null, approx = false;
 
-  if (typeof e.webkitCompassHeading === 'number' && !isNaN(e.webkitCompassHeading)
-      && e.webkitCompassHeading >= 0){
-    h = e.webkitCompassHeading;                                   // iOS：已经是真北
+  if (hasWebkit){
+    h = e.webkitCompassHeading;                                    // iOS：真北
   } else if (typeof e.alpha === 'number'){
     const beta = e.beta || 0;
     // 平放时公式退化，直接用 alpha；立着/斜着拿用倾角补偿公式
     h = Math.abs(beta) < 8 ? ((360 - e.alpha) % 360)
                            : tiltCompensatedHeading(e.alpha, beta, e.gamma || 0);
-    approx = !e.absolute;                                          // 非绝对方向 → 相对朝向
+    approx = !isAbsolute;                                          // 相对朝向
   }
 
   if (h === null) return;
@@ -552,8 +561,8 @@ function startCompass(){
                    typeof DeviceOrientationEvent.requestPermission === 'function';
   if (!needPerm){
     compassStarted = true;
-    window.addEventListener('deviceorientationabsolute', onOrientation, true);
-    window.addEventListener('deviceorientation', onOrientation, true);
+    window.addEventListener('deviceorientationabsolute', e => onOrientation(e, true), true);
+    window.addEventListener('deviceorientation', e => onOrientation(e, false), true);
     return;
   }
   // iOS 13+：权限必须在用户手势里申请，借首次触摸触发一次
@@ -561,7 +570,7 @@ function startCompass(){
     DeviceOrientationEvent.requestPermission().then(r => {
       if (r === 'granted'){
         compassStarted = true;
-        window.addEventListener('deviceorientation', onOrientation, true);
+        window.addEventListener('deviceorientation', e => onOrientation(e, false), true);
       }
     }).catch(() => {});
   }, { once: true });
